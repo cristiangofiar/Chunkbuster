@@ -7,7 +7,7 @@ import pytest
 
 from chunkbuster.core.contracts import ComponentBindings
 from chunkbuster.core.models import Query
-from chunkbuster.errors import BuildError, InvalidModelOutputError
+from chunkbuster.errors import BuildError, ConfigurationError, InvalidModelOutputError
 from chunkbuster.tree_classification.models import Taxonomy, TaxonomyEdge, TaxonomyNode
 from chunkbuster.tree_classification.pipeline import TreeClassificationPipeline
 
@@ -232,10 +232,13 @@ async def test_weighted_sum_combines_path_score_features() -> None:
             "type": "weighted_sum",
             "input": "dense_nodes",
             "terms": [
-                {"type": "level", "index": 1, "weight": 0.6},
-                {"type": "mean", "weight": 0.1},
-                {"type": "leaf", "weight": 0.2},
-                {"type": "weakest", "weight": 0.1},
+                {"root": 0.1},
+                {"level_1": 0.4},
+                {"level_2": 0.1},
+                {"mean": 0.1},
+                {"leaf": 0.1},
+                {"lowest": 0.1},
+                {"highest": 0.1},
             ],
             "top_k": 10,
         }
@@ -257,7 +260,38 @@ async def test_weighted_sum_combines_path_score_features() -> None:
     selected = (await pipeline.classify("query")).outputs["primary"].selected[0]
 
     assert selected.item.node_ids == ("root", "a", "c")
-    assert selected.score == pytest.approx(0.54)
+    assert selected.score == pytest.approx(0.58)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "terms",
+    (
+        [{"weakest": 1.0}],
+        [{"level_0": 1.0}],
+        [{"mean": 0.5, "leaf": 0.5}],
+        [{"mean": 0.5}, {"mean": 0.5}],
+    ),
+)
+async def test_weighted_sum_rejects_invalid_terms(terms) -> None:
+    config = _config()
+    config["path_scorers"] = [
+        {
+            "name": "weighted_paths",
+            "type": "weighted_sum",
+            "input": "dense_nodes",
+            "terms": terms,
+        }
+    ]
+    for decider in config["deciders"]:
+        decider["input"] = "weighted_paths"
+
+    with pytest.raises(ConfigurationError, match="weighted_sum"):
+        await TreeClassificationPipeline.build(
+            taxonomy=_taxonomy(with_embeddings=True),
+            config=config,
+            bindings=_bindings(SpyEmbeddingPreprocessor()),
+        )
 
 
 class LeafPathScorer:

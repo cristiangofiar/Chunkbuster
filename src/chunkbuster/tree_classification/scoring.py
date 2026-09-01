@@ -6,12 +6,7 @@ from math import isfinite, sqrt
 
 from ..core.ranking import RankedItem, Ranking
 from ..errors import InvalidModelOutputError, PreprocessingError
-from .config import (
-    LevelPathTermConfig,
-    MeanPathScorerConfig,
-    MeanPathTermConfig,
-    WeightedSumPathScorerConfig,
-)
+from .config import MeanPathScorerConfig, WeightedSumPathScorerConfig
 from .models import TaxonomyPath
 from .taxonomy import TaxonomySnapshot
 
@@ -70,20 +65,26 @@ def builtin_path_score(
 
     score = 0.0
     for term in spec.terms:
-        if isinstance(term, MeanPathTermConfig):
+        name, weight = next(iter(term.items()))
+        if name == "mean":
             value = sum(node_scores) / len(node_scores)
-        elif isinstance(term, LevelPathTermConfig):
+        elif name == "root":
+            value = node_scores[0]
+        elif name == "leaf":
+            value = node_scores[-1]
+        elif name == "lowest":
+            value = min(node_scores)
+        elif name == "highest":
+            value = max(node_scores)
+        else:
+            level = int(name.removeprefix("level_"))
             try:
-                value = node_scores[term.index]
+                value = node_scores[level]
             except IndexError as exc:
                 raise PreprocessingError(
-                    f"path {path.id} has no level {term.index}"
+                    f"path {path.id} has no {name} after its root"
                 ) from exc
-        elif term.type == "leaf":
-            value = node_scores[-1]
-        else:
-            value = min(node_scores)
-        score += term.weight * value
+        score += weight * value
     return score
 
 

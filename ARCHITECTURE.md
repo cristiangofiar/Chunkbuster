@@ -213,9 +213,10 @@ los paths puntuados, aunque queden fuera del `top_k` del path scorer. El adapter
 devuelve IDs; el pipeline valida identidad, unicidad y límite y materializa los
 paths canónicos. Una selección vacía produce `status="abstained"`.
 
-`weighted_sum` admite términos `level`, `mean`, `leaf` y `weakest`; la suma no
-normaliza pesos. `custom` resuelve un binding de `ComponentBindings.path_scorers`
-con `score_path(path, node_scores)`. Los deciders LLM se resuelven desde
+`weighted_sum` admite `root`, niveles posteriores a la raíz mediante `level_n`,
+`mean`, `leaf`, `lowest` y `highest`; la suma no normaliza pesos. `custom`
+resuelve un binding de `ComponentBindings.path_scorers` con
+`score_path(path, node_scores)`. Los deciders LLM se resuelven desde
 `ComponentBindings.deciders` y pueden ser síncronos o asíncronos.
 
 `classify(query, outputs=...)` puede materializar solo un subconjunto de outputs

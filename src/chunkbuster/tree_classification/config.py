@@ -4,13 +4,12 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 
 from ..core.config import StrictConfig
 
 Name = Annotated[str, Field(min_length=1)]
 PositiveInt = Annotated[int, Field(gt=0)]
-NonNegativeInt = Annotated[int, Field(ge=0)]
 
 
 class EmbeddingPreprocessorConfig(StrictConfig):
@@ -34,42 +33,33 @@ class MeanPathScorerConfig(StrictConfig):
     top_k: PositiveInt = 20
 
 
-class MeanPathTermConfig(StrictConfig):
-    type: Literal["mean"]
-    weight: float
-
-
-class LeafPathTermConfig(StrictConfig):
-    type: Literal["leaf"]
-    weight: float
-
-
-class WeakestPathTermConfig(StrictConfig):
-    type: Literal["weakest"]
-    weight: float
-
-
-class LevelPathTermConfig(StrictConfig):
-    type: Literal["level"]
-    index: NonNegativeInt
-    weight: float
-
-
-PathScoreTermConfig = Annotated[
-    MeanPathTermConfig
-    | LeafPathTermConfig
-    | WeakestPathTermConfig
-    | LevelPathTermConfig,
-    Field(discriminator="type"),
-]
-
-
 class WeightedSumPathScorerConfig(StrictConfig):
     name: Name
     type: Literal["weighted_sum"]
     input: Name
-    terms: Annotated[tuple[PathScoreTermConfig, ...], Field(min_length=1)]
+    terms: Annotated[tuple[dict[str, float], ...], Field(min_length=1)]
     top_k: PositiveInt = 20
+
+    @field_validator("terms")
+    @classmethod
+    def validate_terms(
+        cls, terms: tuple[dict[str, float], ...]
+    ) -> tuple[dict[str, float], ...]:
+        names = []
+        for term in terms:
+            if len(term) != 1:
+                raise ValueError("each weighted_sum term must contain one key")
+            name = next(iter(term))
+            suffix = name.removeprefix("level_")
+            is_level = name.startswith("level_") and suffix.isdigit()
+            if name not in {"root", "mean", "leaf", "lowest", "highest"} and not (
+                is_level and int(suffix) > 0
+            ):
+                raise ValueError(f"unknown weighted_sum term {name!r}")
+            names.append(name)
+        if len(names) != len(set(names)):
+            raise ValueError("weighted_sum term names must be unique")
+        return terms
 
 
 class CustomPathScorerConfig(StrictConfig):

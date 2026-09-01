@@ -137,8 +137,9 @@ cobertura debe ser completa: mezclar nodos con y sin embedding falla durante
 ### Path scoring configurable
 
 `mean` conserva la media aritmética original. `weighted_sum` permite sumar
-componentes ponderados: `level` (nivel con índice desde cero), `mean`, `leaf` y
-`weakest`. Los pesos no se normalizan automáticamente.
+componentes ponderados con una clave por término. `root` representa la raíz;
+`level_1` es el primer nodo posterior a ella; también están disponibles `mean`,
+`leaf`, `lowest` y `highest`. Los pesos no se normalizan automáticamente.
 
 ```python
 "path_scorers": [
@@ -147,13 +148,13 @@ componentes ponderados: `level` (nivel con índice desde cero), `mean`, `leaf` y
         "type": "weighted_sum",
         "input": "dense_nodes",
         "terms": [
-            {"type": "level", "index": 0, "weight": 0.1},
-            {"type": "level", "index": 1, "weight": 0.2},
-            {"type": "level", "index": 2, "weight": 0.3},
-            {"type": "level", "index": 3, "weight": 0.4},
-            {"type": "mean", "weight": 0.2},
-            {"type": "leaf", "weight": 0.5},
-            {"type": "weakest", "weight": 0.3},
+            {"root": 0.1},
+            {"level_1": 0.4},
+            {"level_2": 0.1},
+            {"mean": 0.1},
+            {"leaf": 0.1},
+            {"lowest": 0.1},
+            {"highest": 0.1},
         ],
         "top_k": 10,
     }
