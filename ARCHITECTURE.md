@@ -210,8 +210,10 @@ Para cada query:
 `threshold` selecciona todos los candidatos con `score >= min_score`, con un
 `count` opcional. `llm` llama a `decide(query, ranking, count=...)` sobre todos
 los paths puntuados, aunque queden fuera del `top_k` del path scorer. El adapter
-devuelve IDs; el pipeline valida identidad, unicidad y límite y materializa los
-paths canónicos. Una selección vacía produce `status="abstained"`.
+devuelve obligatoriamente un `DecisionSelection`; el pipeline valida identidad,
+unicidad y límite y materializa los paths canónicos. `reason` y `metadata` se
+propagan a `ClassificationDecision`. Una selección vacía produce
+`status="abstained"`.
 
 `weighted_sum` admite `root`, niveles posteriores a la raíz mediante `level_n`,
 `mean`, `leaf`, `lowest` y `highest`; la suma no normaliza pesos. `custom`

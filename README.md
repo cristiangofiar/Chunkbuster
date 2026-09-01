@@ -51,6 +51,7 @@ import asyncio
 
 from chunkbuster import (
     ComponentBindings,
+    DecisionSelection,
     Taxonomy,
     TaxonomyEdge,
     TaxonomyNode,
@@ -188,15 +189,20 @@ bindings = ComponentBindings(
 ### LLM decider
 
 Un decider `llm` recibe la `Query`, un `Ranking[TaxonomyPath]` con **todos** los
-paths puntuados y el `count` máximo. El binding devuelve una secuencia ordenada
-de IDs de path; Chunkbuster rechaza IDs desconocidos, duplicados o selecciones
-por encima de `count`, y siempre publica los objetos `TaxonomyPath` canónicos.
+paths puntuados y el `count` máximo. El binding debe devolver un
+`DecisionSelection`; Chunkbuster rechaza IDs desconocidos, duplicados o
+selecciones por encima de `count`, y siempre publica los objetos `TaxonomyPath`
+canónicos. `reason` y `metadata` se conservan en `ClassificationDecision`.
 
 ```python
 class MyLLMDecider:
     async def decide(self, query, candidates, *, count):
         # El adapter llama al proveedor y valida/extrae su salida estructurada.
-        return (candidates.items[0].id,)
+        return DecisionSelection(
+            path_ids=(candidates.items[0].id,),
+            reason="Es el path que mejor responde la consulta",
+            metadata={"validation_used": True, "retry": 0},
+        )
 
 
 llm_config = {

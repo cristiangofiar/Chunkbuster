@@ -94,11 +94,36 @@ class TaxonomyPath:
 
 
 @dataclass(frozen=True, slots=True)
+class DecisionSelection:
+    path_ids: tuple[str, ...] = ()
+    reason: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        if isinstance(self.path_ids, str):
+            raise ValueError("decision path IDs must be a sequence of strings")
+        path_ids = tuple(self.path_ids)
+        if not all(isinstance(path_id, str) and path_id for path_id in path_ids):
+            raise ValueError("decision path IDs must be non-empty strings")
+        if len(path_ids) != len(set(path_ids)):
+            raise ValueError("decision path IDs must be unique")
+        if self.reason is not None and not isinstance(self.reason, str):
+            raise ValueError("decision reason must be a string or None")
+        object.__setattr__(self, "path_ids", path_ids)
+        object.__setattr__(self, "metadata", _metadata(self.metadata))
+
+
+@dataclass(frozen=True, slots=True)
 class ClassificationDecision:
     name: str
     status: Literal["selected", "abstained"]
     selected: tuple[RankedItem[TaxonomyPath], ...]
     reason: str | None = None
+    metadata: Mapping[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "selected", tuple(self.selected))
+        object.__setattr__(self, "metadata", _metadata(self.metadata))
 
 
 @dataclass(frozen=True, slots=True)

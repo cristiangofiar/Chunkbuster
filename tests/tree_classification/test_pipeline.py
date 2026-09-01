@@ -8,7 +8,12 @@ import pytest
 from chunkbuster.core.contracts import ComponentBindings
 from chunkbuster.core.models import Query
 from chunkbuster.errors import BuildError, ConfigurationError, InvalidModelOutputError
-from chunkbuster.tree_classification.models import Taxonomy, TaxonomyEdge, TaxonomyNode
+from chunkbuster.tree_classification.models import (
+    DecisionSelection,
+    Taxonomy,
+    TaxonomyEdge,
+    TaxonomyNode,
+)
 from chunkbuster.tree_classification.pipeline import TreeClassificationPipeline
 
 
@@ -335,15 +340,23 @@ async def test_custom_path_scorer_binding_defines_arbitrary_scoring() -> None:
 
 
 class FakeLLMDecider:
-    def __init__(self, *, unknown: bool = False) -> None:
+    def __init__(self, *, unknown: bool = False, legacy_output: bool = False) -> None:
         self.unknown = unknown
+        self.legacy_output = legacy_output
         self.candidate_ids: tuple[str, ...] = ()
 
     async def decide(self, query, candidates, *, count):
         assert query.text == "choose a path"
         assert count == 1
         self.candidate_ids = candidates.ids
-        return ("missing",) if self.unknown else (candidates.items[-1].id,)
+        path_ids = ("missing",) if self.unknown else (candidates.items[-1].id,)
+        if self.legacy_output:
+            return path_ids
+        return DecisionSelection(
+            path_ids=path_ids,
+            reason="best semantic match",
+            metadata={"validation_used": True, "retry": 0},
+        )
 
 
 @pytest.mark.asyncio
@@ -375,6 +388,10 @@ async def test_llm_decider_receives_all_paths_and_returns_canonical_path() -> No
     assert len(llm.candidate_ids) == 2
     assert decision.selected[0].id == llm.candidate_ids[-1]
     assert decision.selected[0].item.node_ids == ("root", "b")
+    assert decision.reason == "best semantic match"
+    assert decision.metadata == {"validation_used": True, "retry": 0}
+    with pytest.raises(TypeError):
+        decision.metadata["retry"] = 1
 
 
 @pytest.mark.asyncio
@@ -399,6 +416,31 @@ async def test_llm_decider_cannot_invent_paths() -> None:
     )
 
     with pytest.raises(InvalidModelOutputError, match="unknown path IDs"):
+        await pipeline.classify("choose a path")
+
+
+@pytest.mark.asyncio
+async def test_llm_decider_must_return_decision_selection() -> None:
+    config = _config()
+    config["deciders"] = [
+        {
+            "name": "semantic_choice",
+            "type": "llm",
+            "binding": "llm",
+            "input": "mean_paths",
+        }
+    ]
+    config["outputs"] = {"primary": "semantic_choice"}
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            deciders={"llm": FakeLLMDecider(legacy_output=True)},
+        ),
+    )
+
+    with pytest.raises(InvalidModelOutputError, match="return DecisionSelection"):
         await pipeline.classify("choose a path")
 
 

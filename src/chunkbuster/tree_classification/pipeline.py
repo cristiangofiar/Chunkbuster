@@ -12,7 +12,7 @@ from ..core.contracts import ComponentBindings
 from ..core.models import Query, as_query
 from ..errors import BuildError, PreprocessingError
 from .config import CustomPathScorerConfig, LLMDeciderConfig, TreeClassificationConfig
-from .decisions import decide, decide_with_llm
+from .decisions import decide, decide_with_llm, materialize_decision
 from .models import Taxonomy, TreeClassificationResult
 from .scoring import (
     builtin_path_score,
@@ -223,14 +223,21 @@ class TreeClassificationPipeline:
             if decider_name not in decisions:
                 spec = deciders[decider_name]
                 if isinstance(spec, LLMDeciderConfig):
-                    decisions[decider_name] = await decide_with_llm(
+                    selection = await decide_with_llm(
                         spec,
                         self._deciders[decider_name],
                         query,
                         full_ranking,
                     )
+                    decision_ranking = full_ranking
                 else:
-                    decisions[decider_name] = decide(spec, ranking)
+                    selection = decide(spec, ranking)
+                    decision_ranking = ranking
+                decisions[decider_name] = materialize_decision(
+                    spec,
+                    selection,
+                    decision_ranking,
+                )
             result[output_name] = decisions[decider_name]
         return TreeClassificationResult(
             query.id,
