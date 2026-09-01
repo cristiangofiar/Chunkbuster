@@ -18,7 +18,9 @@ class ComponentBindings:
 
     preprocessors: Mapping[str, Any] = field(default_factory=dict)
     retrievers: Mapping[str, Any] = field(default_factory=dict)
+    path_scorers: Mapping[str, Any] = field(default_factory=dict)
+    deciders: Mapping[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
-        for name in ("preprocessors", "retrievers"):
+        for name in ("preprocessors", "retrievers", "path_scorers", "deciders"):
             object.__setattr__(self, name, _freeze(getattr(self, name)))

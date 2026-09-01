@@ -9,7 +9,7 @@ pequeños de extremo a extremo:
 
 | Producto | Implementado ahora |
 |---|---|
-| `TreeClassificationPipeline` | Bosque estricto, embeddings densos, score medio por path y deciders `top_one`, `top_k` y `threshold` |
+| `TreeClassificationPipeline` | Bosque estricto, embeddings densos, path scoring configurable y deciders deterministas o LLM |
 | `RetrievalPipeline` | Retrievers fuente, retrievers restringidos por candidatos, fusión RRF y múltiples outputs |
 
 No se incluyen SDKs, modelos, vectorstores ni credenciales. Esos objetos se
@@ -134,6 +134,84 @@ Si cada nodo ya trae `embedding`, `prepare_documents()` no se invoca. La
 cobertura debe ser completa: mezclar nodos con y sin embedding falla durante
 `build()`.
 
+### Path scoring configurable
+
+`mean` conserva la media aritmética original. `weighted_sum` permite sumar
+componentes ponderados: `level` (nivel con índice desde cero), `mean`, `leaf` y
+`weakest`. Los pesos no se normalizan automáticamente.
+
+```python
+"path_scorers": [
+    {
+        "name": "weighted_paths",
+        "type": "weighted_sum",
+        "input": "dense_nodes",
+        "terms": [
+            {"type": "level", "index": 0, "weight": 0.1},
+            {"type": "level", "index": 1, "weight": 0.2},
+            {"type": "level", "index": 2, "weight": 0.3},
+            {"type": "level", "index": 3, "weight": 0.4},
+            {"type": "mean", "weight": 0.2},
+            {"type": "leaf", "weight": 0.5},
+            {"type": "weakest", "weight": 0.3},
+        ],
+        "top_k": 10,
+    }
+]
+```
+
+Para una fórmula que no pueda expresarse así, use `type: custom` y un binding
+con `score_path(path, node_scores) -> float`. `node_scores` conserva el orden
+de los nodos del path y el método puede ser síncrono o asíncrono.
+
+```python
+class MyPathScorer:
+    def score_path(self, path, node_scores):
+        return 0.7 * node_scores[-1] + 0.3 * min(node_scores)
+
+
+custom_path_config = {
+    "name": "custom_paths",
+    "type": "custom",
+    "binding": "my_path_scorer",
+    "input": "dense_nodes",
+    "top_k": 10,
+}
+
+bindings = ComponentBindings(
+    preprocessors={"fake_embeddings": FakeEmbeddings()},
+    path_scorers={"my_path_scorer": MyPathScorer()},
+)
+```
+
+### LLM decider
+
+Un decider `llm` recibe la `Query`, un `Ranking[TaxonomyPath]` con **todos** los
+paths puntuados y el `count` máximo. El binding devuelve una secuencia ordenada
+de IDs de path; Chunkbuster rechaza IDs desconocidos, duplicados o selecciones
+por encima de `count`, y siempre publica los objetos `TaxonomyPath` canónicos.
+
+```python
+class MyLLMDecider:
+    async def decide(self, query, candidates, *, count):
+        # El adapter llama al proveedor y valida/extrae su salida estructurada.
+        return (candidates.items[0].id,)
+
+
+llm_config = {
+    "name": "llm_choice",
+    "type": "llm",
+    "binding": "my_llm",
+    "input": "weighted_paths",
+    "count": 1,
+}
+
+bindings = ComponentBindings(
+    preprocessors={"fake_embeddings": FakeEmbeddings()},
+    deciders={"my_llm": MyLLMDecider()},
+)
+```
+
 ## Retrieval
 
 Un retriever fuente introduce chunks. Un retriever con `input` solo puede
@@ -256,7 +334,6 @@ Esta entrega es deliberadamente pequeña. Todavía no implementa:
 - BM25 ni tokenización;
 - node fusions o ranking fusions en Tree;
 - rerankers;
-- deciders/selectors LLM;
 - ejecución concurrente o límites de concurrencia;
 - aislamiento de fallos por output;
 - integraciones con proveedores o vectorstores;

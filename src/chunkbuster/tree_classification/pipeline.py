@@ -11,10 +11,16 @@ from ..core.config import ConfigInput, load_config
 from ..core.contracts import ComponentBindings
 from ..core.models import Query, as_query
 from ..errors import BuildError, PreprocessingError
-from .config import TreeClassificationConfig
-from .decisions import decide
+from .config import CustomPathScorerConfig, LLMDeciderConfig, TreeClassificationConfig
+from .decisions import decide, decide_with_llm
 from .models import Taxonomy, TreeClassificationResult
-from .scoring import score_paths, validate_vector
+from .scoring import (
+    builtin_path_score,
+    rank_paths,
+    score_nodes,
+    validate_path_score,
+    validate_vector,
+)
 from .taxonomy import TaxonomySnapshot, build_snapshot
 
 
@@ -27,10 +33,14 @@ class TreeClassificationPipeline:
         snapshot: TaxonomySnapshot,
         config: TreeClassificationConfig,
         preprocessor: object,
+        path_scorer: object | None,
+        deciders: dict[str, object],
     ) -> None:
         self._snapshot = snapshot
         self._config = config
         self._preprocessor = preprocessor
+        self._path_scorer = path_scorer
+        self._deciders = MappingProxyType(dict(deciders))
 
     @classmethod
     async def build(
@@ -57,6 +67,19 @@ class TreeClassificationPipeline:
         if path_scorer.input != node_scorer.name:
             raise BuildError("path scorer must consume the configured node scorer")
 
+        bound_path_scorer = None
+        if isinstance(path_scorer, CustomPathScorerConfig):
+            try:
+                bound_path_scorer = bindings.path_scorers[path_scorer.binding]
+            except KeyError as exc:
+                raise BuildError(
+                    f"missing path scorer binding {path_scorer.binding!r}"
+                ) from exc
+            if not callable(getattr(bound_path_scorer, "score_path", None)):
+                raise BuildError(
+                    "custom path scorer must define score_path(path, scores)"
+                )
+
         deciders = {spec.name: spec for spec in parsed.deciders}
         if not deciders or not parsed.outputs:
             raise BuildError("the pipeline requires at least one decider and output")
@@ -73,6 +96,18 @@ class TreeClassificationPipeline:
         unused_deciders = set(deciders) - set(parsed.outputs.values())
         if unused_deciders:
             raise BuildError(f"unused deciders: {sorted(unused_deciders)!r}")
+
+        bound_deciders: dict[str, object] = {}
+        for spec in parsed.deciders:
+            if not isinstance(spec, LLMDeciderConfig):
+                continue
+            try:
+                component = bindings.deciders[spec.binding]
+            except KeyError as exc:
+                raise BuildError(f"missing decider binding {spec.binding!r}") from exc
+            if not callable(getattr(component, "decide", None)):
+                raise BuildError("LLM decider binding must define decide()")
+            bound_deciders[spec.name] = component
 
         try:
             preprocessor = bindings.preprocessors[preprocessor_spec.binding]
@@ -125,7 +160,13 @@ class TreeClassificationPipeline:
                     dimensions=preprocessor_spec.dimensions,
                     label=f"embedding for node {node.id!r}",
                 )
-        return cls(snapshot=snapshot, config=parsed, preprocessor=preprocessor)
+        return cls(
+            snapshot=snapshot,
+            config=parsed,
+            preprocessor=preprocessor,
+            path_scorer=bound_path_scorer,
+            deciders=bound_deciders,
+        )
 
     @property
     def taxonomy(self) -> Taxonomy:
@@ -151,22 +192,46 @@ class TreeClassificationPipeline:
         )
         node_scorer = self._config.node_scorers[0]
         path_scorer = self._config.path_scorers[0]
-        ranking = score_paths(
+        node_scores = score_nodes(
             self._snapshot,
             vector,
             similarity=node_scorer.similarity,
-            top_k=path_scorer.top_k,
-            source=node_scorer.name,
         )
+        path_scores: dict[str, float] = {}
+        for path in self._snapshot.paths:
+            scores = tuple(node_scores[node_id] for node_id in path.node_ids)
+            if isinstance(path_scorer, CustomPathScorerConfig):
+                raw_score = await resolve(self._path_scorer.score_path(path, scores))
+                path_scores[path.id] = validate_path_score(raw_score, path=path)
+            else:
+                path_scores[path.id] = builtin_path_score(path, scores, path_scorer)
+        full_ranking = rank_paths(
+            self._snapshot,
+            path_scores,
+            source=path_scorer.name,
+        )
+        ranking = full_ranking.top(path_scorer.top_k)
         requested = tuple(self._config.outputs) if outputs is None else tuple(outputs)
         unknown = set(requested) - set(self._config.outputs)
         if unknown:
             raise ValueError(f"unknown outputs: {sorted(unknown)!r}")
         deciders = {spec.name: spec for spec in self._config.deciders}
-        result = {
-            output_name: decide(deciders[self._config.outputs[output_name]], ranking)
-            for output_name in requested
-        }
+        decisions = {}
+        result = {}
+        for output_name in requested:
+            decider_name = self._config.outputs[output_name]
+            if decider_name not in decisions:
+                spec = deciders[decider_name]
+                if isinstance(spec, LLMDeciderConfig):
+                    decisions[decider_name] = await decide_with_llm(
+                        spec,
+                        self._deciders[decider_name],
+                        query,
+                        full_ranking,
+                    )
+                else:
+                    decisions[decider_name] = decide(spec, ranking)
+            result[output_name] = decisions[decider_name]
         return TreeClassificationResult(
             query.id,
             self._snapshot.taxonomy.id,

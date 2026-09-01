@@ -10,6 +10,7 @@ from ..core.config import StrictConfig
 
 Name = Annotated[str, Field(min_length=1)]
 PositiveInt = Annotated[int, Field(gt=0)]
+NonNegativeInt = Annotated[int, Field(ge=0)]
 
 
 class EmbeddingPreprocessorConfig(StrictConfig):
@@ -33,6 +34,58 @@ class MeanPathScorerConfig(StrictConfig):
     top_k: PositiveInt = 20
 
 
+class MeanPathTermConfig(StrictConfig):
+    type: Literal["mean"]
+    weight: float
+
+
+class LeafPathTermConfig(StrictConfig):
+    type: Literal["leaf"]
+    weight: float
+
+
+class WeakestPathTermConfig(StrictConfig):
+    type: Literal["weakest"]
+    weight: float
+
+
+class LevelPathTermConfig(StrictConfig):
+    type: Literal["level"]
+    index: NonNegativeInt
+    weight: float
+
+
+PathScoreTermConfig = Annotated[
+    MeanPathTermConfig
+    | LeafPathTermConfig
+    | WeakestPathTermConfig
+    | LevelPathTermConfig,
+    Field(discriminator="type"),
+]
+
+
+class WeightedSumPathScorerConfig(StrictConfig):
+    name: Name
+    type: Literal["weighted_sum"]
+    input: Name
+    terms: Annotated[tuple[PathScoreTermConfig, ...], Field(min_length=1)]
+    top_k: PositiveInt = 20
+
+
+class CustomPathScorerConfig(StrictConfig):
+    name: Name
+    type: Literal["custom"]
+    input: Name
+    binding: Name
+    top_k: PositiveInt = 20
+
+
+PathScorerConfig = Annotated[
+    MeanPathScorerConfig | WeightedSumPathScorerConfig | CustomPathScorerConfig,
+    Field(discriminator="type"),
+]
+
+
 class TopOneDeciderConfig(StrictConfig):
     name: Name
     type: Literal["top_one"]
@@ -54,8 +107,16 @@ class ThresholdDeciderConfig(StrictConfig):
     count: PositiveInt | None = None
 
 
+class LLMDeciderConfig(StrictConfig):
+    name: Name
+    type: Literal["llm"]
+    input: Name
+    binding: Name
+    count: PositiveInt = 1
+
+
 DeciderConfig = Annotated[
-    TopOneDeciderConfig | TopKDeciderConfig | ThresholdDeciderConfig,
+    TopOneDeciderConfig | TopKDeciderConfig | ThresholdDeciderConfig | LLMDeciderConfig,
     Field(discriminator="type"),
 ]
 
@@ -66,7 +127,6 @@ class TreeClassificationConfig(StrictConfig):
     kind: Literal["tree_classification"] = "tree_classification"
     preprocessors: tuple[EmbeddingPreprocessorConfig, ...]
     node_scorers: tuple[DenseNodeScorerConfig, ...]
-    path_scorers: tuple[MeanPathScorerConfig, ...]
+    path_scorers: tuple[PathScorerConfig, ...]
     deciders: tuple[DeciderConfig, ...]
     outputs: dict[Name, Name]
-

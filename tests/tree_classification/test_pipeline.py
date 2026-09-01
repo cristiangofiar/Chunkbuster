@@ -7,7 +7,7 @@ import pytest
 
 from chunkbuster.core.contracts import ComponentBindings
 from chunkbuster.core.models import Query
-from chunkbuster.errors import BuildError
+from chunkbuster.errors import BuildError, InvalidModelOutputError
 from chunkbuster.tree_classification.models import Taxonomy, TaxonomyEdge, TaxonomyNode
 from chunkbuster.tree_classification.pipeline import TreeClassificationPipeline
 
@@ -110,6 +110,25 @@ def _bindings(preprocessor: SpyEmbeddingPreprocessor) -> ComponentBindings:
     return ComponentBindings(preprocessors={"embedding": preprocessor})
 
 
+def _branching_taxonomy() -> Taxonomy:
+    return Taxonomy(
+        "weighted",
+        (
+            TaxonomyNode("root", "Root", embedding=(1.0, 0.0)),
+            TaxonomyNode("a", "A", embedding=(0.8, 0.0)),
+            TaxonomyNode("b", "B", embedding=(0.2, 0.0)),
+            TaxonomyNode("c", "C", embedding=(0.0, 1.0)),
+            TaxonomyNode("d", "D", embedding=(1.0, 0.0)),
+        ),
+        (
+            TaxonomyEdge("root", "a"),
+            TaxonomyEdge("root", "b"),
+            TaxonomyEdge("a", "c"),
+            TaxonomyEdge("b", "d"),
+        ),
+    )
+
+
 @pytest.mark.asyncio
 async def test_dense_mean_pipeline_exposes_top_one_and_top_k() -> None:
     preprocessor = SpyEmbeddingPreprocessor()
@@ -201,6 +220,152 @@ async def test_threshold_decider_can_abstain() -> None:
 
     assert decision.status == "abstained"
     assert decision.selected == ()
+
+
+@pytest.mark.asyncio
+async def test_weighted_sum_combines_path_score_features() -> None:
+    config = _config()
+    config["node_scorers"][0]["similarity"] = "dot_product"
+    config["path_scorers"] = [
+        {
+            "name": "weighted_paths",
+            "type": "weighted_sum",
+            "input": "dense_nodes",
+            "terms": [
+                {"type": "level", "index": 1, "weight": 0.6},
+                {"type": "mean", "weight": 0.1},
+                {"type": "leaf", "weight": 0.2},
+                {"type": "weakest", "weight": 0.1},
+            ],
+            "top_k": 10,
+        }
+    ]
+    config["deciders"] = [
+        {
+            "name": "best",
+            "type": "top_one",
+            "input": "weighted_paths",
+        }
+    ]
+    config["outputs"] = {"primary": "best"}
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_branching_taxonomy(),
+        config=config,
+        bindings=_bindings(SpyEmbeddingPreprocessor()),
+    )
+
+    selected = (await pipeline.classify("query")).outputs["primary"].selected[0]
+
+    assert selected.item.node_ids == ("root", "a", "c")
+    assert selected.score == pytest.approx(0.54)
+
+
+class LeafPathScorer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[tuple[str, ...], tuple[float, ...]]] = []
+
+    async def score_path(self, path, node_scores):
+        self.calls.append((path.node_ids, node_scores))
+        return node_scores[-1]
+
+
+@pytest.mark.asyncio
+async def test_custom_path_scorer_binding_defines_arbitrary_scoring() -> None:
+    config = _config()
+    config["node_scorers"][0]["similarity"] = "dot_product"
+    config["path_scorers"] = [
+        {
+            "name": "custom_paths",
+            "type": "custom",
+            "binding": "leaf_score",
+            "input": "dense_nodes",
+            "top_k": 10,
+        }
+    ]
+    for decider in config["deciders"]:
+        decider["input"] = "custom_paths"
+    scorer = LeafPathScorer()
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_branching_taxonomy(),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            path_scorers={"leaf_score": scorer},
+        ),
+    )
+
+    decision = (await pipeline.classify("query")).outputs["primary"]
+
+    assert decision.selected[0].item.node_ids == ("root", "b", "d")
+    assert len(scorer.calls) == 2
+
+
+class FakeLLMDecider:
+    def __init__(self, *, unknown: bool = False) -> None:
+        self.unknown = unknown
+        self.candidate_ids: tuple[str, ...] = ()
+
+    async def decide(self, query, candidates, *, count):
+        assert query.text == "choose a path"
+        assert count == 1
+        self.candidate_ids = candidates.ids
+        return ("missing",) if self.unknown else (candidates.items[-1].id,)
+
+
+@pytest.mark.asyncio
+async def test_llm_decider_receives_all_paths_and_returns_canonical_path() -> None:
+    config = _config()
+    config["path_scorers"][0]["top_k"] = 1
+    config["deciders"] = [
+        {
+            "name": "semantic_choice",
+            "type": "llm",
+            "binding": "llm",
+            "input": "mean_paths",
+            "count": 1,
+        }
+    ]
+    config["outputs"] = {"primary": "semantic_choice"}
+    llm = FakeLLMDecider()
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            deciders={"llm": llm},
+        ),
+    )
+
+    decision = (await pipeline.classify("choose a path")).outputs["primary"]
+
+    assert len(llm.candidate_ids) == 2
+    assert decision.selected[0].id == llm.candidate_ids[-1]
+    assert decision.selected[0].item.node_ids == ("root", "b")
+
+
+@pytest.mark.asyncio
+async def test_llm_decider_cannot_invent_paths() -> None:
+    config = _config()
+    config["deciders"] = [
+        {
+            "name": "semantic_choice",
+            "type": "llm",
+            "binding": "llm",
+            "input": "mean_paths",
+        }
+    ]
+    config["outputs"] = {"primary": "semantic_choice"}
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            deciders={"llm": FakeLLMDecider(unknown=True)},
+        ),
+    )
+
+    with pytest.raises(InvalidModelOutputError, match="unknown path IDs"):
+        await pipeline.classify("choose a path")
 
 
 @pytest.mark.asyncio

@@ -5,7 +5,13 @@ from __future__ import annotations
 from math import isfinite, sqrt
 
 from ..core.ranking import RankedItem, Ranking
-from ..errors import PreprocessingError
+from ..errors import InvalidModelOutputError, PreprocessingError
+from .config import (
+    LevelPathTermConfig,
+    MeanPathScorerConfig,
+    MeanPathTermConfig,
+    WeightedSumPathScorerConfig,
+)
 from .models import TaxonomyPath
 from .taxonomy import TaxonomySnapshot
 
@@ -42,28 +48,74 @@ def _similarity(left: tuple[float, ...], right: tuple[float, ...], kind: str) ->
     return dot / (left_norm * right_norm)
 
 
-def score_paths(
+def score_nodes(
     snapshot: TaxonomySnapshot,
     query_embedding: tuple[float, ...],
     *,
     similarity: str,
-    top_k: int,
-    source: str,
-) -> Ranking[TaxonomyPath]:
-    node_scores = {
+) -> dict[str, float]:
+    return {
         node_id: _similarity(query_embedding, node.embedding or (), similarity)
         for node_id, node in snapshot.nodes_by_id.items()
     }
+
+
+def builtin_path_score(
+    path: TaxonomyPath,
+    node_scores: tuple[float, ...],
+    spec: MeanPathScorerConfig | WeightedSumPathScorerConfig,
+) -> float:
+    if isinstance(spec, MeanPathScorerConfig):
+        return sum(node_scores) / len(node_scores)
+
+    score = 0.0
+    for term in spec.terms:
+        if isinstance(term, MeanPathTermConfig):
+            value = sum(node_scores) / len(node_scores)
+        elif isinstance(term, LevelPathTermConfig):
+            try:
+                value = node_scores[term.index]
+            except IndexError as exc:
+                raise PreprocessingError(
+                    f"path {path.id} has no level {term.index}"
+                ) from exc
+        elif term.type == "leaf":
+            value = node_scores[-1]
+        else:
+            value = min(node_scores)
+        score += term.weight * value
+    return score
+
+
+def validate_path_score(value: object, *, path: TaxonomyPath) -> float:
+    try:
+        score = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise InvalidModelOutputError(
+            f"path scorer returned a non-numeric score for {path.id}"
+        ) from exc
+    if not isfinite(score):
+        raise InvalidModelOutputError(
+            f"path scorer returned a non-finite score for {path.id}"
+        )
+    return score
+
+
+def rank_paths(
+    snapshot: TaxonomySnapshot,
+    path_scores: dict[str, float],
+    *,
+    source: str,
+) -> Ranking[TaxonomyPath]:
     candidates = tuple(
         RankedItem(
             path.id,
             path,
-            sum(node_scores[node_id] for node_id in path.node_ids)
-            / len(path.node_ids),
+            path_scores[path.id],
             provenance=(source,),
         )
         for path in snapshot.paths
     )
     order = {item.id: index for index, item in enumerate(candidates)}
     ranked = sorted(candidates, key=lambda item: (-item.score, order[item.id]))
-    return Ranking(tuple(ranked[:top_k]), "similarity", frozenset({source}))
+    return Ranking(tuple(ranked), "path_score", frozenset({source}))

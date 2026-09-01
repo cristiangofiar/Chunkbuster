@@ -10,7 +10,7 @@ estrechos:
 
 ```text
 Tree:
-query -> embedding -> dense node scores -> mean path ranking -> decider -> output
+query -> embedding -> dense node scores -> configurable path ranking -> decider -> output
 
 Retrieval:
 query -> preprocessor -> source/candidate retrievers -> optional RRF -> output
@@ -19,14 +19,14 @@ query -> preprocessor -> source/candidate retrievers -> optional RRF -> output
 | Área | Disponible |
 |---|---|
 | Tree taxonomy | Bosque estricto, múltiples raíces y paths raíz-hoja exactos |
-| Tree scoring | Un preprocessor embedding, un scorer dense y un path scorer mean |
-| Tree decisions | `top_one`, `top_k`, `threshold` y outputs nombrados |
+| Tree scoring | Un scorer dense y path scoring `mean`, `weighted_sum` o `custom` |
+| Tree decisions | `top_one`, `top_k`, `threshold`, `llm` y outputs nombrados |
 | Retrieval | Retrievers fuente y restringidos, DAG de rankings, RRF y outputs nombrados |
 | Configuración | YAML, JSON, mapping o modelo Pydantic |
 | Adapters | Objetos Python explícitos, síncronos o asíncronos |
 
 No están implementados todavía BM25, fusiones de nodos/paths en Tree,
-rerankers, LLMs, scheduling concurrente ni aislamiento de fallos por output.
+rerankers, scheduling concurrente ni aislamiento de fallos por output.
 Los diseños futuros no deben documentarse como capacidades actuales.
 
 ## Estructura real
@@ -181,7 +181,7 @@ El vertical actual exige exactamente:
 
 - un preprocessor de embeddings;
 - un node scorer dense;
-- un path scorer `mean`;
+- un path scorer `mean`, `weighted_sum` o `custom`;
 - uno o más deciders alcanzables desde `outputs`.
 
 Si todos los nodos traen embeddings, se validan dimensión y finitud. Si ninguno
@@ -201,13 +201,22 @@ Para cada query:
 
 1. se genera un embedding;
 2. se puntúa cada nodo con cosine, dot product o euclidean negativo;
-3. cada path recibe la media aritmética de sus node scores;
+3. cada path recibe la media, una suma ponderada configurable o el score de un
+   binding `custom`;
 4. el ranking se ordena determinísticamente y se recorta;
 5. cada output solicitado ejecuta su decider.
 
 `top_one` selecciona como máximo uno. `top_k` selecciona hasta `count`.
 `threshold` selecciona todos los candidatos con `score >= min_score`, con un
-`count` opcional. Una selección vacía produce `status="abstained"`.
+`count` opcional. `llm` llama a `decide(query, ranking, count=...)` sobre todos
+los paths puntuados, aunque queden fuera del `top_k` del path scorer. El adapter
+devuelve IDs; el pipeline valida identidad, unicidad y límite y materializa los
+paths canónicos. Una selección vacía produce `status="abstained"`.
+
+`weighted_sum` admite términos `level`, `mean`, `leaf` y `weakest`; la suma no
+normaliza pesos. `custom` resuelve un binding de `ComponentBindings.path_scorers`
+con `score_path(path, node_scores)`. Los deciders LLM se resuelven desde
+`ComponentBindings.deciders` y pueden ser síncronos o asíncronos.
 
 `classify(query, outputs=...)` puede materializar solo un subconjunto de outputs
 públicos, pero no cambia configuración ni scoring.
@@ -290,6 +299,7 @@ Los tests nuevos cubren contratos, no detalles accidentales:
 - RRF determinista;
 - bosque, múltiples raíces, ciclos y múltiples padres;
 - embeddings provistos o generados una sola vez;
+- path scoring ponderado/custom y selección LLM canonicalizada;
 - carga equivalente desde dict, YAML y JSON;
 - source/candidate retrieval, preprocessing compartido y RRF;
 - rechazo de IDs inventados y ciclos del DAG.
@@ -304,8 +314,7 @@ Orden orientativo, sin promesa de compatibilidad hasta estabilizar la API:
 
 1. Tree lexical: tokenización/BM25, node fusions y ranking fusions.
 2. Transformaciones externas: rerankers y canonicalización común.
-3. LLM estructurado: decider 0..N para Tree y selector de rankings para
-   Retrieval.
+3. Selector LLM de rankings para Retrieval.
 4. Runtime: nodos independientes concurrentes, límites y aislamiento de fallos
    por output.
 5. Integraciones concretas con embeddings y vectorstores, una por vez.
