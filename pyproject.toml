@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "chunkbuster"
-version = "0.2.2"
+version = "0.3.0"
 description = "Composable tree classification and retrieval pipelines"
 readme = "README.md"
 requires-python = ">=3.12"
