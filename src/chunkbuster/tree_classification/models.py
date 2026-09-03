@@ -94,6 +94,15 @@ class TaxonomyPath:
 
 
 @dataclass(frozen=True, slots=True)
+class DecisionRoute:
+    decider: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.decider, str) or not self.decider:
+            raise ValueError("routed decider must be a non-empty string")
+
+
+@dataclass(frozen=True, slots=True)
 class DecisionSelection:
     path_ids: tuple[str, ...] = ()
     reason: str | None = None
@@ -101,7 +110,7 @@ class DecisionSelection:
 
     def __post_init__(self) -> None:
         if isinstance(self.path_ids, str):
-            raise ValueError("decision path IDs must be a sequence of strings")
+            raise TypeError("decision path IDs must be a sequence of strings")
         path_ids = tuple(self.path_ids)
         if not all(isinstance(path_id, str) and path_id for path_id in path_ids):
             raise ValueError("decision path IDs must be non-empty strings")

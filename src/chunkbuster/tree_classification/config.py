@@ -111,6 +111,19 @@ DeciderConfig = Annotated[
 ]
 
 
+class RouterConfig(StrictConfig):
+    name: Name
+    deciders: Annotated[tuple[Name, ...], Field(min_length=1)]
+    binding: Name
+
+    @field_validator("deciders")
+    @classmethod
+    def validate_deciders(cls, deciders: tuple[str, ...]) -> tuple[str, ...]:
+        if len(deciders) != len(set(deciders)):
+            raise ValueError("router decider names must be unique")
+        return deciders
+
+
 class TreeClassificationConfig(StrictConfig):
     version: Literal[1] = 1
     name: Name
@@ -119,4 +132,5 @@ class TreeClassificationConfig(StrictConfig):
     node_scorers: tuple[DenseNodeScorerConfig, ...]
     path_scorers: tuple[PathScorerConfig, ...]
     deciders: tuple[DeciderConfig, ...]
+    routers: tuple[RouterConfig, ...] = ()
     outputs: dict[Name, Name]

@@ -9,6 +9,7 @@ from .retrieval import (
 )
 from .tree_classification import (
     ClassificationDecision,
+    DecisionRoute,
     DecisionSelection,
     Taxonomy,
     TaxonomyEdge,
@@ -22,6 +23,7 @@ __all__ = [
     "ClassificationDecision",
     "Chunk",
     "ComponentBindings",
+    "DecisionRoute",
     "DecisionSelection",
     "Query",
     "RankedItem",

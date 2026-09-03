@@ -12,7 +12,7 @@ from ..core.contracts import ComponentBindings
 from ..core.models import Query, as_query
 from ..errors import BuildError, PreprocessingError
 from .config import CustomPathScorerConfig, LLMDeciderConfig, TreeClassificationConfig
-from .decisions import decide, decide_with_llm, materialize_decision
+from .decisions import decide, decide_with_llm, materialize_decision, route_decision
 from .models import Taxonomy, TreeClassificationResult
 from .scoring import (
     builtin_path_score,
@@ -25,7 +25,7 @@ from .taxonomy import TaxonomySnapshot, build_snapshot
 
 
 class TreeClassificationPipeline:
-    """Immutable dense -> mean path -> deterministic decision pipeline."""
+    """Immutable configurable tree-classification pipeline."""
 
     def __init__(
         self,
@@ -35,12 +35,14 @@ class TreeClassificationPipeline:
         preprocessor: object,
         path_scorer: object | None,
         deciders: dict[str, object],
+        routers: dict[str, object],
     ) -> None:
         self._snapshot = snapshot
         self._config = config
         self._preprocessor = preprocessor
         self._path_scorer = path_scorer
         self._deciders = MappingProxyType(dict(deciders))
+        self._routers = MappingProxyType(dict(routers))
 
     @classmethod
     async def build(
@@ -81,19 +83,47 @@ class TreeClassificationPipeline:
                 )
 
         deciders = {spec.name: spec for spec in parsed.deciders}
+        routers = {spec.name: spec for spec in parsed.routers}
         if not deciders or not parsed.outputs:
             raise BuildError("the pipeline requires at least one decider and output")
         if len(deciders) != len(parsed.deciders):
             raise BuildError("decider names must be unique")
+        if len(routers) != len(parsed.routers):
+            raise BuildError("router names must be unique")
+        collisions = set(deciders) & set(routers)
+        if collisions:
+            raise BuildError(
+                f"router and decider names collide: {sorted(collisions)!r}"
+            )
         for spec in parsed.deciders:
             if spec.input != path_scorer.name:
                 raise BuildError(f"decider {spec.name!r} references an unknown ranking")
-        missing_outputs = set(parsed.outputs.values()) - set(deciders)
+        for spec in parsed.routers:
+            missing_deciders = set(spec.deciders) - set(deciders)
+            if missing_deciders:
+                raise BuildError(
+                    f"router {spec.name!r} references unknown deciders "
+                    f"{sorted(missing_deciders)!r}"
+                )
+            inputs = {deciders[name].input for name in spec.deciders}
+            if len(inputs) != 1:
+                raise BuildError(
+                    f"router {spec.name!r} deciders must share one input ranking"
+                )
+        targets = set(parsed.outputs.values())
+        missing_outputs = targets - set(deciders) - set(routers)
         if missing_outputs:
             raise BuildError(
-                f"outputs reference unknown deciders {sorted(missing_outputs)!r}"
+                f"outputs reference unknown targets {sorted(missing_outputs)!r}"
             )
-        unused_deciders = set(deciders) - set(parsed.outputs.values())
+        used_routers = targets & set(routers)
+        unused_routers = set(routers) - used_routers
+        if unused_routers:
+            raise BuildError(f"unused routers: {sorted(unused_routers)!r}")
+        used_deciders = targets & set(deciders)
+        for router_name in used_routers:
+            used_deciders.update(routers[router_name].deciders)
+        unused_deciders = set(deciders) - used_deciders
         if unused_deciders:
             raise BuildError(f"unused deciders: {sorted(unused_deciders)!r}")
 
@@ -108,6 +138,16 @@ class TreeClassificationPipeline:
             if not callable(getattr(component, "decide", None)):
                 raise BuildError("LLM decider binding must define decide()")
             bound_deciders[spec.name] = component
+
+        bound_routers: dict[str, object] = {}
+        for spec in parsed.routers:
+            try:
+                component = bindings.routers[spec.binding]
+            except KeyError as exc:
+                raise BuildError(f"missing router binding {spec.binding!r}") from exc
+            if not callable(getattr(component, "route", None)):
+                raise BuildError("router binding must define route()")
+            bound_routers[spec.name] = component
 
         try:
             preprocessor = bindings.preprocessors[preprocessor_spec.binding]
@@ -166,6 +206,7 @@ class TreeClassificationPipeline:
             preprocessor=preprocessor,
             path_scorer=bound_path_scorer,
             deciders=bound_deciders,
+            routers=bound_routers,
         )
 
     @property
@@ -216,10 +257,23 @@ class TreeClassificationPipeline:
         if unknown:
             raise ValueError(f"unknown outputs: {sorted(unknown)!r}")
         deciders = {spec.name: spec for spec in self._config.deciders}
+        routers = {spec.name: spec for spec in self._config.routers}
         decisions = {}
+        routes = {}
         result = {}
         for output_name in requested:
-            decider_name = self._config.outputs[output_name]
+            target_name = self._config.outputs[output_name]
+            if target_name in routers:
+                if target_name not in routes:
+                    routes[target_name] = await route_decision(
+                        routers[target_name],
+                        self._routers[target_name],
+                        query,
+                        ranking,
+                    )
+                decider_name = routes[target_name]
+            else:
+                decider_name = target_name
             if decider_name not in decisions:
                 spec = deciders[decider_name]
                 if isinstance(spec, LLMDeciderConfig):

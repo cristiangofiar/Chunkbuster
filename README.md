@@ -9,7 +9,7 @@ pequeños de extremo a extremo:
 
 | Producto | Implementado ahora |
 |---|---|
-| `TreeClassificationPipeline` | Bosque estricto, embeddings densos, path scoring configurable y deciders deterministas o LLM |
+| `TreeClassificationPipeline` | Bosque estricto, embeddings densos, path scoring configurable, routers y deciders deterministas o LLM |
 | `RetrievalPipeline` | Retrievers fuente, retrievers restringidos por candidatos, fusión RRF y múltiples outputs |
 
 No se incluyen SDKs, modelos, vectorstores ni credenciales. Esos objetos se
@@ -51,6 +51,7 @@ import asyncio
 
 from chunkbuster import (
     ComponentBindings,
+    DecisionRoute,
     DecisionSelection,
     Taxonomy,
     TaxonomyEdge,
@@ -218,6 +219,50 @@ bindings = ComponentBindings(
     deciders={"my_llm": MyLLMDecider()},
 )
 ```
+
+### Routers
+
+Un router terminal inspecciona la query y el ranking recortado por el path
+scorer, y elige exactamente uno de sus deciders autorizados. Puede devolver el
+nombre directamente o un `DecisionRoute`; el pipeline valida la elección y
+ejecuta el decider. El router nunca recibe ni ejecuta componentes.
+
+```python
+class ConfidenceRouter:
+    def route(self, query, candidates):
+        if candidates and candidates[0].score >= 0.85:
+            return "return_top_1"
+        if len(candidates) >= 3 and candidates[2].score >= 0.70:
+            return DecisionRoute("return_top_3")
+        return "llm_choice"
+
+
+router_config = {
+    "name": "confidence_gate",
+    "deciders": ["return_top_1", "return_top_3", "llm_choice"],
+    "binding": "confidence_router",
+}
+
+bindings = ComponentBindings(
+    preprocessors={"fake_embeddings": FakeEmbeddings()},
+    deciders={"my_llm": MyLLMDecider()},
+    routers={"confidence_router": ConfidenceRouter()},
+)
+```
+
+Un output puede apuntar directamente a un decider o a un router:
+
+```python
+"routers": [router_config],
+"outputs": {
+    "direct": "return_top_1",
+    "routed": "confidence_gate",
+},
+```
+
+Bindings síncronos y asíncronos están soportados. Si dos outputs terminan en el
+mismo decider, este se ejecuta una sola vez por query. El decider LLM conserva
+su comportamiento: recibe todos los paths puntuados.
 
 ## Retrieval
 

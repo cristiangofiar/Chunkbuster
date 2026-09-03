@@ -2,6 +2,7 @@
 
 from .models import (
     ClassificationDecision,
+    DecisionRoute,
     DecisionSelection,
     Taxonomy,
     TaxonomyEdge,
@@ -13,6 +14,7 @@ from .pipeline import TreeClassificationPipeline
 
 __all__ = [
     "ClassificationDecision",
+    "DecisionRoute",
     "DecisionSelection",
     "Taxonomy",
     "TaxonomyEdge",

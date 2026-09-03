@@ -1,4 +1,4 @@
-"""Deterministic and bound terminal deciders."""
+"""Terminal routers and deterministic or bound deciders."""
 
 from __future__ import annotations
 
@@ -9,10 +9,16 @@ from ..errors import InvalidModelOutputError
 from .config import (
     DeciderConfig,
     LLMDeciderConfig,
+    RouterConfig,
     ThresholdDeciderConfig,
     TopKDeciderConfig,
 )
-from .models import ClassificationDecision, DecisionSelection, TaxonomyPath
+from .models import (
+    ClassificationDecision,
+    DecisionRoute,
+    DecisionSelection,
+    TaxonomyPath,
+)
 
 
 def decide(
@@ -40,6 +46,28 @@ async def decide_with_llm(
     if not isinstance(raw, DecisionSelection):
         raise InvalidModelOutputError("LLM decider must return DecisionSelection")
     return raw
+
+
+async def route_decision(
+    spec: RouterConfig,
+    component: object,
+    query: Query,
+    ranking: Ranking[TaxonomyPath],
+) -> str:
+    raw = await resolve(component.route(query, ranking))
+    if isinstance(raw, DecisionRoute):
+        decider_name = raw.decider
+    elif isinstance(raw, str) and raw:
+        decider_name = raw
+    else:
+        raise InvalidModelOutputError(
+            "router must return DecisionRoute or a decider name"
+        )
+    if decider_name not in spec.deciders:
+        raise InvalidModelOutputError(
+            f"router {spec.name!r} selected forbidden decider {decider_name!r}"
+        )
+    return decider_name
 
 
 def materialize_decision(

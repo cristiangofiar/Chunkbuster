@@ -9,6 +9,7 @@ from chunkbuster.core.contracts import ComponentBindings
 from chunkbuster.core.models import Query
 from chunkbuster.errors import BuildError, ConfigurationError, InvalidModelOutputError
 from chunkbuster.tree_classification.models import (
+    DecisionRoute,
     DecisionSelection,
     Taxonomy,
     TaxonomyEdge,
@@ -343,9 +344,11 @@ class FakeLLMDecider:
     def __init__(self, *, unknown: bool = False, legacy_output: bool = False) -> None:
         self.unknown = unknown
         self.legacy_output = legacy_output
+        self.calls = 0
         self.candidate_ids: tuple[str, ...] = ()
 
     async def decide(self, query, candidates, *, count):
+        self.calls += 1
         assert query.text == "choose a path"
         assert count == 1
         self.candidate_ids = candidates.ids
@@ -356,6 +359,153 @@ class FakeLLMDecider:
             path_ids=path_ids,
             reason="best semantic match",
             metadata={"validation_used": True, "retry": 0},
+        )
+
+
+class FakeRouter:
+    def __init__(self, result: object) -> None:
+        self.result = result
+        self.calls = 0
+        self.candidate_ids: tuple[str, ...] = ()
+
+    def route(self, query, candidates):
+        self.calls += 1
+        self.candidate_ids = candidates.ids
+        return self.result
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("route", ("best", DecisionRoute("best")))
+async def test_router_accepts_string_or_typed_route(route) -> None:
+    config = _config()
+    config["routers"] = [
+        {
+            "name": "confidence_gate",
+            "deciders": ["best", "alternatives"],
+            "binding": "gate",
+        }
+    ]
+    config["outputs"] = {"primary": "confidence_gate"}
+    router = FakeRouter(route)
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            routers={"gate": router},
+        ),
+    )
+
+    decision = (await pipeline.classify("query")).outputs["primary"]
+
+    assert router.calls == 1
+    assert len(router.candidate_ids) == 2
+    assert decision.name == "best"
+    assert decision.selected[0].item.node_ids == ("root", "a")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("route", "error"),
+    (
+        ("missing", "selected forbidden decider"),
+        (None, "must return DecisionRoute or a decider name"),
+    ),
+)
+async def test_router_rejects_invalid_output(route, error) -> None:
+    config = _config()
+    config["routers"] = [
+        {
+            "name": "confidence_gate",
+            "deciders": ["best", "alternatives"],
+            "binding": "gate",
+        }
+    ]
+    config["outputs"] = {"primary": "confidence_gate"}
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            routers={"gate": FakeRouter(route)},
+        ),
+    )
+
+    with pytest.raises(InvalidModelOutputError, match=error):
+        await pipeline.classify("query")
+
+
+@pytest.mark.asyncio
+async def test_router_and_decider_results_are_cached_per_query() -> None:
+    config = _config()
+    config["path_scorers"][0]["top_k"] = 1
+    config["deciders"] = [
+        {
+            "name": "semantic_choice",
+            "type": "llm",
+            "binding": "llm",
+            "input": "mean_paths",
+        }
+    ]
+    config["routers"] = [
+        {
+            "name": name,
+            "deciders": ["semantic_choice"],
+            "binding": name,
+        }
+        for name in ("first_gate", "second_gate")
+    ]
+    config["outputs"] = {
+        "primary": "first_gate",
+        "secondary": "second_gate",
+    }
+    first = FakeRouter("semantic_choice")
+    second = FakeRouter(DecisionRoute("semantic_choice"))
+    llm = FakeLLMDecider()
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            deciders={"llm": llm},
+            routers={"first_gate": first, "second_gate": second},
+        ),
+    )
+
+    result = await pipeline.classify("choose a path")
+
+    assert first.calls == second.calls == 1
+    assert len(first.candidate_ids) == len(second.candidate_ids) == 1
+    assert llm.calls == 1
+    assert len(llm.candidate_ids) == 2
+    assert result.outputs["primary"] is result.outputs["secondary"]
+
+
+@pytest.mark.asyncio
+async def test_router_references_and_bindings_are_validated_during_build() -> None:
+    config = _config()
+    config["routers"] = [
+        {
+            "name": "confidence_gate",
+            "deciders": ["missing"],
+            "binding": "gate",
+        }
+    ]
+    config["outputs"] = {"primary": "confidence_gate"}
+
+    with pytest.raises(BuildError, match="references unknown deciders"):
+        await TreeClassificationPipeline.build(
+            taxonomy=_taxonomy(with_embeddings=True),
+            config=config,
+            bindings=_bindings(SpyEmbeddingPreprocessor()),
+        )
+
+    config["routers"][0]["deciders"] = ["best", "alternatives"]
+    with pytest.raises(BuildError, match="missing router binding"):
+        await TreeClassificationPipeline.build(
+            taxonomy=_taxonomy(with_embeddings=True),
+            config=config,
+            bindings=_bindings(SpyEmbeddingPreprocessor()),
         )
 
 

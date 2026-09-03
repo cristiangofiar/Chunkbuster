@@ -10,7 +10,7 @@ estrechos:
 
 ```text
 Tree:
-query -> embedding -> dense node scores -> configurable path ranking -> decider -> output
+query -> embedding -> dense node scores -> configurable path ranking -> optional router -> decider -> output
 
 Retrieval:
 query -> preprocessor -> source/candidate retrievers -> optional RRF -> output
@@ -20,7 +20,7 @@ query -> preprocessor -> source/candidate retrievers -> optional RRF -> output
 |---|---|
 | Tree taxonomy | Bosque estricto, múltiples raíces y paths raíz-hoja exactos |
 | Tree scoring | Un scorer dense y path scoring `mean`, `weighted_sum` o `custom` |
-| Tree decisions | `top_one`, `top_k`, `threshold`, `llm` y outputs nombrados |
+| Tree decisions | Routers terminales, `top_one`, `top_k`, `threshold`, `llm` y outputs nombrados |
 | Retrieval | Retrievers fuente y restringidos, DAG de rankings, RRF y outputs nombrados |
 | Configuración | YAML, JSON, mapping o modelo Pydantic |
 | Adapters | Objetos Python explícitos, síncronos o asíncronos |
@@ -182,7 +182,8 @@ El vertical actual exige exactamente:
 - un preprocessor de embeddings;
 - un node scorer dense;
 - un path scorer `mean`, `weighted_sum` o `custom`;
-- uno o más deciders alcanzables desde `outputs`.
+- uno o más deciders alcanzables directa o indirectamente desde `outputs`;
+- cero o más routers terminales que solo pueden seleccionar deciders.
 
 Si todos los nodos traen embeddings, se validan dimensión y finitud. Si ninguno
 los trae, `build()` llama una vez a
@@ -204,7 +205,8 @@ Para cada query:
 3. cada path recibe la media, una suma ponderada configurable o el score de un
    binding `custom`;
 4. el ranking se ordena determinísticamente y se recorta;
-5. cada output solicitado ejecuta su decider.
+5. cada output solicitado resuelve su router opcional;
+6. se ejecuta el decider terminal elegido.
 
 `top_one` selecciona como máximo uno. `top_k` selecciona hasta `count`.
 `threshold` selecciona todos los candidatos con `score >= min_score`, con un
@@ -215,11 +217,19 @@ unicidad y límite y materializa los paths canónicos. `reason` y `metadata` se
 propagan a `ClassificationDecision`. Una selección vacía produce
 `status="abstained"`.
 
+Un router llama a `route(query, ranking)` con el ranking ya recortado por el
+path scorer y devuelve un nombre de decider o un `DecisionRoute`. El pipeline
+comprueba que el destino pertenezca a `RouterConfig.deciders` antes de
+ejecutarlo. Routers y decisiones se cachean por query, por lo que outputs
+compartidos no repiten bindings. Los routers no pueden seleccionar otros
+routers, ejecutar componentes ni transformar rankings.
+
 `weighted_sum` admite `root`, niveles posteriores a la raíz mediante `level_n`,
 `mean`, `leaf`, `lowest` y `highest`; la suma no normaliza pesos. `custom`
 resuelve un binding de `ComponentBindings.path_scorers` con
 `score_path(path, node_scores)`. Los deciders LLM se resuelven desde
-`ComponentBindings.deciders` y pueden ser síncronos o asíncronos.
+`ComponentBindings.deciders`; los routers, desde `ComponentBindings.routers`.
+Ambos pueden ser síncronos o asíncronos.
 
 `classify(query, outputs=...)` puede materializar solo un subconjunto de outputs
 públicos, pero no cambia configuración ni scoring.
