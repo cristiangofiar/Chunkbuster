@@ -217,12 +217,15 @@ unicidad y límite y materializa los paths canónicos. `reason` y `metadata` se
 propagan a `ClassificationDecision`. Una selección vacía produce
 `status="abstained"`.
 
-Un router llama a `route(query, ranking)` con el ranking ya recortado por el
-path scorer y devuelve un nombre de decider o un `DecisionRoute`. El pipeline
-comprueba que el destino pertenezca a `RouterConfig.deciders` antes de
-ejecutarlo. Routers y decisiones se cachean por query, por lo que outputs
-compartidos no repiten bindings. Los routers no pueden seleccionar otros
-routers, ejecutar componentes ni transformar rankings.
+Un router llama a `route(query, ranking, parameters=...)` con el ranking ya
+recortado por el path scorer y devuelve un nombre de decider o un
+`DecisionRoute`. Sus `parameters` son valores compatibles con JSON definidos
+en la configuración y se entregan como un mapping de solo lectura; el binding
+valida su semántica. El pipeline comprueba que el destino pertenezca a
+`RouterConfig.deciders` antes de ejecutarlo. Routers y decisiones se cachean
+por query, por lo que outputs compartidos no repiten bindings. Los routers no
+pueden seleccionar otros routers, ejecutar componentes ni transformar
+rankings.
 
 `weighted_sum` admite `root`, niveles posteriores a la raíz mediante `level_n`,
 `mean`, `leaf`, `lowest` y `highest`; la suma no normaliza pesos. `custom`

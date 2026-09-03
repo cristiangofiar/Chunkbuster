@@ -367,10 +367,12 @@ class FakeRouter:
         self.result = result
         self.calls = 0
         self.candidate_ids: tuple[str, ...] = ()
+        self.parameters = None
 
-    def route(self, query, candidates):
+    def route(self, query, candidates, *, parameters):
         self.calls += 1
         self.candidate_ids = candidates.ids
+        self.parameters = parameters
         return self.result
 
 
@@ -400,8 +402,65 @@ async def test_router_accepts_string_or_typed_route(route) -> None:
 
     assert router.calls == 1
     assert len(router.candidate_ids) == 2
+    assert router.parameters == {}
     assert decision.name == "best"
     assert decision.selected[0].item.node_ids == ("root", "a")
+
+
+@pytest.mark.asyncio
+async def test_router_receives_read_only_parameters_from_config() -> None:
+    config = _config()
+    config["routers"] = [
+        {
+            "name": "confidence_gate",
+            "deciders": ["best", "alternatives"],
+            "binding": "gate",
+            "parameters": {
+                "top_1_threshold": 0.85,
+                "rules": ["semantic_only"],
+            },
+        }
+    ]
+    config["outputs"] = {"primary": "confidence_gate"}
+    router = FakeRouter("best")
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            routers={"gate": router},
+        ),
+    )
+
+    await pipeline.classify("query")
+
+    assert router.parameters == {
+        "top_1_threshold": 0.85,
+        "rules": ["semantic_only"],
+    }
+    with pytest.raises(TypeError):
+        router.parameters["top_1_threshold"] = 0.5
+
+
+@pytest.mark.asyncio
+async def test_router_parameters_must_be_json_compatible() -> None:
+    config = _config()
+    config["routers"] = [
+        {
+            "name": "confidence_gate",
+            "deciders": ["best", "alternatives"],
+            "binding": "gate",
+            "parameters": {"invalid": object()},
+        }
+    ]
+    config["outputs"] = {"primary": "confidence_gate"}
+
+    with pytest.raises(ConfigurationError, match="parameters"):
+        await TreeClassificationPipeline.build(
+            taxonomy=_taxonomy(with_embeddings=True),
+            config=config,
+            bindings=_bindings(SpyEmbeddingPreprocessor()),
+        )
 
 
 @pytest.mark.asyncio
@@ -597,6 +656,15 @@ async def test_llm_decider_must_return_decision_selection() -> None:
 @pytest.mark.asyncio
 async def test_dict_yaml_and_json_load_the_same_configuration(tmp_path: Path) -> None:
     config = _config()
+    config["routers"] = [
+        {
+            "name": "confidence_gate",
+            "deciders": ["best"],
+            "binding": "gate",
+            "parameters": {"threshold": 0.85},
+        }
+    ]
+    config["outputs"]["primary"] = "confidence_gate"
     yaml_path = tmp_path / "pipeline.yaml"
     yaml_path.write_text(
         """\
@@ -626,8 +694,15 @@ deciders:
     type: top_k
     input: mean_paths
     count: 2
+routers:
+  - name: confidence_gate
+    deciders:
+      - best
+    binding: gate
+    parameters:
+      threshold: 0.85
 outputs:
-  primary: best
+  primary: confidence_gate
   alternatives: alternatives
 """,
         encoding="utf-8",
@@ -635,7 +710,10 @@ outputs:
     json_path = tmp_path / "pipeline.json"
     json_path.write_text(json.dumps(config), encoding="utf-8")
     preprocessor = SpyEmbeddingPreprocessor()
-    bindings = _bindings(preprocessor)
+    bindings = ComponentBindings(
+        preprocessors={"embedding": preprocessor},
+        routers={"gate": FakeRouter("best")},
+    )
     taxonomy = _taxonomy(with_embeddings=True)
 
     pipelines = [

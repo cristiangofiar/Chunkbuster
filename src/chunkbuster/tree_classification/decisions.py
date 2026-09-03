@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from types import MappingProxyType
+
 from ..core._async import resolve
 from ..core.models import Query
 from ..core.ranking import Ranking
@@ -54,7 +56,8 @@ async def route_decision(
     query: Query,
     ranking: Ranking[TaxonomyPath],
 ) -> str:
-    raw = await resolve(component.route(query, ranking))
+    parameters = MappingProxyType(dict(spec.parameters))
+    raw = await resolve(component.route(query, ranking, parameters=parameters))
     if isinstance(raw, DecisionRoute):
         decider_name = raw.decider
     elif isinstance(raw, str) and raw:

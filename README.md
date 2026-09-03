@@ -229,10 +229,13 @@ ejecuta el decider. El router nunca recibe ni ejecuta componentes.
 
 ```python
 class ConfidenceRouter:
-    def route(self, query, candidates):
-        if candidates and candidates[0].score >= 0.85:
+    def route(self, query, candidates, *, parameters):
+        if candidates and candidates[0].score >= parameters["top_1_threshold"]:
             return "return_top_1"
-        if len(candidates) >= 3 and candidates[2].score >= 0.70:
+        if (
+            len(candidates) >= 3
+            and candidates[2].score >= parameters["top_3_threshold"]
+        ):
             return DecisionRoute("return_top_3")
         return "llm_choice"
 
@@ -241,6 +244,10 @@ router_config = {
     "name": "confidence_gate",
     "deciders": ["return_top_1", "return_top_3", "llm_choice"],
     "binding": "confidence_router",
+    "parameters": {
+        "top_1_threshold": 0.85,
+        "top_3_threshold": 0.70,
+    },
 }
 
 bindings = ComponentBindings(
@@ -262,7 +269,10 @@ Un output puede apuntar directamente a un decider o a un router:
 
 Bindings síncronos y asíncronos están soportados. Si dos outputs terminan en el
 mismo decider, este se ejecuta una sola vez por query. El decider LLM conserva
-su comportamiento: recibe todos los paths puntuados.
+su comportamiento: recibe todos los paths puntuados. `parameters` admite
+valores compatibles con JSON y llega como un mapping de solo lectura; si se
+omite, el binding recibe `{}`. Chunkbuster valida su estructura, mientras que
+el binding valida el significado y los campos que necesita.
 
 ## Retrieval
 

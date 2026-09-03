@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, JsonValue, field_validator
 
 from ..core.config import StrictConfig
 
@@ -115,6 +115,7 @@ class RouterConfig(StrictConfig):
     name: Name
     deciders: Annotated[tuple[Name, ...], Field(min_length=1)]
     binding: Name
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
 
     @field_validator("deciders")
     @classmethod
