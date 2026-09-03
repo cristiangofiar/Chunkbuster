@@ -126,7 +126,10 @@ duplicar la API pública.
 
 `Ranking[T]` es una tupla ordenada e inmutable. Al construirla se rechazan IDs
 duplicados y se reasignan ranks desde uno. `require_subset()` canonicaliza el
-item contra el input y rechaza IDs inventados.
+item contra el input y rechaza IDs inventados. `to_text()` conserva ese orden y
+acepta un formatter por `RankedItem`; por defecto representa solo identidad e
+item, sin añadir score ni rank. Para `TaxonomyPath`, `str(path)` concatena los
+labels raíz-hoja y omite descripciones y metadata.
 
 La primera estrategia compartida es RRF:
 

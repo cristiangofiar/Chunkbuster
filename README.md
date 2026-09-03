@@ -220,6 +220,33 @@ bindings = ComponentBindings(
 )
 ```
 
+### Formateo de rankings
+
+`Ranking.to_text()` conserva el orden actual de los candidatos. Para paths, el
+formato predeterminado muestra únicamente el ID canónico y los labels desde la
+raíz hasta la hoja; no expone score, rank, metadata ni `text`:
+
+```text
+- ["products","refunds"]: Productos > Reembolsos
+- ["products","access"]: Productos > Acceso
+```
+
+Un formatter opcional recibe el `RankedItem` completo y controla cada línea:
+
+```python
+def verbose_path(candidate):
+    descriptions = " > ".join(
+        node.text or node.label for node in candidate.item.nodes
+    )
+    return f"{candidate.rank}. {descriptions} ({candidate.score})"
+
+
+text = candidates.to_text(verbose_path)
+```
+
+Esta utilidad solo produce texto; no construye prompts ni modifica el contrato
+de los deciders.
+
 ### Routers
 
 Un router terminal inspecciona la query y el ranking recortado por el path

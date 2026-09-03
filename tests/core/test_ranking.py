@@ -23,6 +23,23 @@ def test_ranked_item_rejects_non_finite_scores(score: float) -> None:
         RankedItem("item", object(), score)
 
 
+def test_ranking_to_text_is_minimal_ordered_and_customizable() -> None:
+    ranking = Ranking(
+        (
+            RankedItem("a", "Alpha", 0.9, metadata={"source": "dense"}),
+            RankedItem("b", "Beta", 0.7),
+        )
+    )
+
+    assert ranking.to_text() == "- a: Alpha\n- b: Beta"
+    assert Ranking().to_text() == ""
+    assert ranking.to_text(
+        lambda candidate: (
+            f"{candidate.rank}|{candidate.score}|{dict(candidate.metadata)}"
+        )
+    ) == "1|0.9|{'source': 'dense'}\n2|0.7|{}"
+
+
 def test_rrf_combines_by_identity_and_preserves_deterministic_order() -> None:
     dense = Ranking(
         (

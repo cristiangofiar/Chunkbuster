@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from chunkbuster.core.ranking import RankedItem, Ranking
 from chunkbuster.errors import InvalidTaxonomyError
 from chunkbuster.tree_classification.models import Taxonomy, TaxonomyEdge, TaxonomyNode
 from chunkbuster.tree_classification.taxonomy import build_snapshot
@@ -35,6 +36,22 @@ def test_forest_supports_multiple_roots_and_singleton_subtrees() -> None:
         ("root_b", "leaf_b"),
         ("single",),
     )
+
+
+def test_path_ranking_text_contains_only_identity_and_labels() -> None:
+    taxonomy = Taxonomy(
+        "support",
+        (
+            TaxonomyNode("root", "Support", text="internal root description"),
+            TaxonomyNode("refund", "Refunds", text="internal leaf description"),
+        ),
+        (TaxonomyEdge("root", "refund"),),
+    )
+    path = build_snapshot(taxonomy).paths[0]
+
+    text = Ranking((RankedItem(path.id, path, 0.93),)).to_text()
+
+    assert text == '- ["root","refund"]: Support > Refunds'
 
 
 def test_forest_rejects_a_node_with_multiple_parents() -> None:

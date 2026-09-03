@@ -76,6 +76,9 @@ class TaxonomyPath:
     node_ids: tuple[str, ...]
     nodes: tuple[TaxonomyNode, ...]
 
+    def __str__(self) -> str:
+        return " > ".join(node.label for node in self.nodes)
+
     @property
     def id(self) -> str:
         return json.dumps(self.node_ids, ensure_ascii=False, separators=(",", ":"))

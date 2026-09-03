@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
 from math import isfinite
 from types import MappingProxyType
@@ -65,6 +65,16 @@ class Ranking[Item]:
     @property
     def ids(self) -> tuple[str, ...]:
         return tuple(item.id for item in self.items)
+
+    def to_text(
+        self,
+        formatter: Callable[[RankedItem[Item]], str] | None = None,
+    ) -> str:
+        if formatter is None:
+            return "\n".join(
+                f"- {candidate.id}: {candidate.item}" for candidate in self.items
+            )
+        return "\n".join(formatter(candidate) for candidate in self.items)
 
     def top(self, count: int) -> Ranking[Item]:
         if count <= 0:
