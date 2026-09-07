@@ -7,7 +7,7 @@ el código. Chunkbuster separa la topología del pipeline de las tecnologías qu
 la ejecutan: conecta tus modelos, índices y reglas como bindings Python;
 combínalos y publica varios resultados sin acoplarte a un proveedor.
 
-> Estado: `0.3.0`, API experimental. Requiere Python 3.12 o superior.
+> Estado: `0.4.0`, API experimental. Requiere Python 3.12 o superior.
 
 | Producto | Para qué sirve | Qué combina |
 |---|---|---|
