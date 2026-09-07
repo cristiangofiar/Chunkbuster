@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from chunkbuster import TextTokenizer
 from chunkbuster.core.contracts import ComponentBindings
 from chunkbuster.core.models import Query
 from chunkbuster.errors import BuildError, ConfigurationError, InvalidModelOutputError
@@ -149,9 +150,9 @@ async def test_dense_mean_pipeline_exposes_top_one_and_top_k() -> None:
     assert result.query_id == "query-1"
     assert result.taxonomy_id == "products"
     assert tuple(result.outputs) == ("primary", "alternatives")
-    assert tuple(
-        item.item.node_ids for item in result.outputs["primary"].selected
-    ) == (("root", "a"),)
+    assert tuple(item.item.node_ids for item in result.outputs["primary"].selected) == (
+        ("root", "a"),
+    )
     assert tuple(
         item.item.node_ids for item in result.outputs["alternatives"].selected
     ) == (("root", "a"), ("root", "b"))
@@ -366,14 +367,29 @@ class FakeRouter:
     def __init__(self, result: object) -> None:
         self.result = result
         self.calls = 0
-        self.candidate_ids: tuple[str, ...] = ()
+        self.candidate_ids: dict[str, tuple[str, ...]] = {}
         self.parameters = None
 
     def route(self, query, candidates, *, parameters):
         self.calls += 1
-        self.candidate_ids = candidates.ids
+        self.candidate_ids = {
+            decider: ranking.ids for decider, ranking in candidates.items()
+        }
         self.parameters = parameters
         return self.result
+
+
+class SpyTokenizer:
+    def __init__(self) -> None:
+        self.tokenizer = TextTokenizer()
+        self.document_inputs: list[tuple[str, ...]] = []
+
+    def prepare_query(self, text: str) -> tuple[str, ...]:
+        return self.tokenizer.prepare_query(text)
+
+    def prepare_documents(self, texts: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+        self.document_inputs.append(texts)
+        return self.tokenizer.prepare_documents(texts)
 
 
 @pytest.mark.asyncio
@@ -401,7 +417,8 @@ async def test_router_accepts_string_or_typed_route(route) -> None:
     decision = (await pipeline.classify("query")).outputs["primary"]
 
     assert router.calls == 1
-    assert len(router.candidate_ids) == 2
+    assert set(router.candidate_ids) == {"best", "alternatives"}
+    assert all(len(ids) == 2 for ids in router.candidate_ids.values())
     assert router.parameters == {}
     assert decision.name == "best"
     assert decision.selected[0].item.node_ids == ("root", "a")
@@ -534,10 +551,125 @@ async def test_router_and_decider_results_are_cached_per_query() -> None:
     result = await pipeline.classify("choose a path")
 
     assert first.calls == second.calls == 1
-    assert len(first.candidate_ids) == len(second.candidate_ids) == 1
+    assert set(first.candidate_ids) == set(second.candidate_ids) == {"semantic_choice"}
+    assert len(first.candidate_ids["semantic_choice"]) == 1
     assert llm.calls == 1
     assert len(llm.candidate_ids) == 2
     assert result.outputs["primary"] is result.outputs["secondary"]
+
+
+@pytest.mark.asyncio
+async def test_bm25_node_and_path_fusions_feed_different_router_branches() -> None:
+    taxonomy = Taxonomy(
+        "catalog",
+        (
+            TaxonomyNode("root", "Catalog", embedding=(1.0, 0.0), tokens=("catalog",)),
+            TaxonomyNode("red", "Red shoes", embedding=(0.0, 1.0)),
+            TaxonomyNode("blue", "Blue hats", embedding=(1.0, 0.0)),
+        ),
+        (TaxonomyEdge("root", "red"), TaxonomyEdge("root", "blue")),
+    )
+    config = {
+        "version": 1,
+        "name": "hybrid_tree",
+        "kind": "tree_classification",
+        "preprocessors": [
+            {
+                "name": "semantic",
+                "type": "embedding",
+                "binding": "embedding",
+                "dimensions": 2,
+            },
+            {"name": "lexical", "type": "tokenizer", "binding": "tokenizer"},
+        ],
+        "node_scorers": [
+            {
+                "name": "dense_nodes",
+                "type": "dense",
+                "preprocessor": "semantic",
+            },
+            {
+                "name": "bm25_nodes",
+                "type": "bm25",
+                "preprocessor": "lexical",
+            },
+        ],
+        "node_fusions": [
+            {
+                "name": "hybrid_nodes",
+                "type": "weighted_rrf",
+                "inputs": ["dense_nodes", "bm25_nodes"],
+                "k": 1,
+            }
+        ],
+        "path_scorers": [
+            {"name": "dense_paths", "type": "mean", "input": "dense_nodes"},
+            {"name": "bm25_paths", "type": "mean", "input": "bm25_nodes"},
+            {"name": "hybrid_paths", "type": "mean", "input": "hybrid_nodes"},
+        ],
+        "path_fusions": [
+            {
+                "name": "fused_paths",
+                "type": "weighted_rrf",
+                "inputs": ["dense_paths", "bm25_paths"],
+                "weights": [1, 2],
+                "k": 1,
+            }
+        ],
+        "deciders": [
+            {"name": "dense", "type": "top_one", "input": "dense_paths"},
+            {"name": "bm25", "type": "top_one", "input": "bm25_paths"},
+            {"name": "hybrid", "type": "top_one", "input": "hybrid_paths"},
+            {"name": "fused", "type": "top_one", "input": "fused_paths"},
+        ],
+        "routers": [
+            {
+                "name": "choose",
+                "deciders": ["dense", "bm25", "hybrid", "fused"],
+                "binding": "choose",
+            }
+        ],
+        "outputs": {"primary": "choose"},
+    }
+    tokenizer = SpyTokenizer()
+    router = FakeRouter("fused")
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=taxonomy,
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={
+                "embedding": SpyEmbeddingPreprocessor(),
+                "tokenizer": tokenizer,
+            },
+            routers={"choose": router},
+        ),
+    )
+
+    decision = (await pipeline.classify("red shoes")).outputs["primary"]
+
+    assert tokenizer.document_inputs == [("Red shoes", "Blue hats")]
+    assert pipeline.taxonomy.nodes[0].tokens == ("catalog",)
+    assert pipeline.taxonomy.nodes[1].tokens == ("red", "shoes")
+    assert router.candidate_ids["dense"][0] == '["root","blue"]'
+    assert router.candidate_ids["bm25"][0] == '["root","red"]'
+    assert router.candidate_ids["hybrid"][0] == '["root","red"]'
+    assert router.candidate_ids["fused"][0] == '["root","red"]'
+    assert decision.name == "fused"
+
+
+@pytest.mark.asyncio
+async def test_unused_tree_scoring_branch_is_rejected() -> None:
+    config = _config()
+    config["path_scorers"].append(
+        {"name": "unused_paths", "type": "mean", "input": "dense_nodes"}
+    )
+
+    with pytest.raises(BuildError, match="unused nodes.*unused_paths"):
+        await TreeClassificationPipeline.build(
+            taxonomy=_taxonomy(with_embeddings=True),
+            config=config,
+            bindings=_bindings(SpyEmbeddingPreprocessor()),
+        )
 
 
 @pytest.mark.asyncio

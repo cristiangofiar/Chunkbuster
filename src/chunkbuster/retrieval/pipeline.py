@@ -6,30 +6,23 @@ from collections.abc import Iterable
 from types import MappingProxyType
 
 from ..core._async import resolve
-from ..core.config import ConfigInput, load_config
+from ..core.config import ConfigInput, by_name, load_config
 from ..core.contracts import ComponentBindings
 from ..core.dag import CompiledDAG, compile_dag
 from ..core.models import Query, as_query
 from ..core.ranking import (
     Ranking,
-    reciprocal_rank_fusion,
+    fuse_rankings,
     require_ranking,
     require_subset,
 )
 from ..errors import BuildError
-from .config import RetrievalConfig, RetrieverConfig, RRFFusionConfig
+from .config import FusionConfig, RetrievalConfig, RetrieverConfig
 from .models import Chunk, RetrievalOutput, RetrievalPipelineResult
 
 
-def _by_name(values, *, label: str):
-    result = {value.name: value for value in values}
-    if len(result) != len(values):
-        raise BuildError(f"{label} names must be unique")
-    return result
-
-
 class RetrievalPipeline:
-    """Sequential DAG of bound retrievers and built-in RRF fusions."""
+    """Sequential DAG of bound retrievers and built-in ranking fusions."""
 
     def __init__(
         self,
@@ -59,9 +52,9 @@ class RetrievalPipeline:
     ) -> RetrievalPipeline:
         parsed = load_config(config, RetrievalConfig)
         bindings = bindings or ComponentBindings()
-        preprocessor_specs = _by_name(parsed.preprocessors, label="preprocessor")
-        retriever_specs = _by_name(parsed.retrievers, label="retriever")
-        fusion_specs = _by_name(parsed.fusions, label="fusion")
+        preprocessor_specs = by_name(parsed.preprocessors, label="preprocessor")
+        retriever_specs = by_name(parsed.retrievers, label="retriever")
+        fusion_specs = by_name(parsed.fusions, label="fusion")
 
         overlap = set(retriever_specs) & set(fusion_specs)
         if overlap:
@@ -111,9 +104,7 @@ class RetrievalPipeline:
             spec.name: (() if spec.input is None else (spec.input,))
             for spec in parsed.retrievers
         }
-        dependencies.update(
-            {spec.name: tuple(spec.inputs) for spec in parsed.fusions}
-        )
+        dependencies.update({spec.name: tuple(spec.inputs) for spec in parsed.fusions})
         dag = compile_dag(dependencies, parsed.outputs)
         return cls(
             config=parsed,
@@ -199,11 +190,18 @@ class RetrievalPipeline:
 
     @staticmethod
     def _run_fusion(
-        spec: RRFFusionConfig,
+        spec: FusionConfig,
         rankings: dict[str, Ranking[Chunk]],
     ) -> Ranking[Chunk]:
-        return reciprocal_rank_fusion(
-            {name: rankings[name] for name in spec.inputs},
+        inputs = {name: rankings[name] for name in spec.inputs}
+        weights = (
+            dict(zip(spec.inputs, spec.weights, strict=True)) if spec.weights else None
+        )
+        return fuse_rankings(
+            inputs,
+            method="weighted_rrf" if spec.type == "rrf" else spec.type,
             top_k=spec.top_k,
+            weights=weights,
+            normalization=spec.normalization,
             k=spec.k,
         )

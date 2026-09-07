@@ -3,6 +3,10 @@
 Este documento describe el paquete bajo `src/chunkbuster`; el repositorio ya no
 conserva la implementación del prototipo anterior.
 
+Para ver estos componentes crecer desde pipelines mínimos hasta grafos híbridos
+completos, consulta [EXAMPLES.md](EXAMPLES.md). El [README](README.md) conserva
+únicamente el quick start de cada producto.
+
 ## Estado de esta entrega
 
 La primera entrega implementa dos recorridos completos, deliberadamente
@@ -10,23 +14,23 @@ estrechos:
 
 ```text
 Tree:
-query -> embedding -> dense node scores -> configurable path ranking -> optional router -> decider -> output
+query -> preprocessors -> node scorers/fusion -> path scorers/fusion -> router -> decider -> output
 
 Retrieval:
-query -> preprocessor -> source/candidate retrievers -> optional RRF -> output
+query -> preprocessor -> source/candidate retrievers -> optional fusion -> output
 ```
 
 | Área | Disponible |
 |---|---|
 | Tree taxonomy | Bosque estricto, múltiples raíces y paths raíz-hoja exactos |
-| Tree scoring | Un scorer dense y path scoring `mean`, `weighted_sum` o `custom` |
-| Tree decisions | Routers terminales, `top_one`, `top_k`, `threshold`, `llm` y outputs nombrados |
-| Retrieval | Retrievers fuente y restringidos, DAG de rankings, RRF y outputs nombrados |
+| Tree scoring | Node scoring dense/BM25; fusiones de nodos y paths; path scoring configurable |
+| Tree decisions | Routers multi-ranking, `top_one`, `top_k`, `threshold`, `llm` y outputs |
+| Retrieval | Retrievers, DAG y fusiones `weighted_rrf`, `weighted_sum` o `comb_mnz` |
 | Configuración | YAML, JSON, mapping o modelo Pydantic |
 | Adapters | Objetos Python explícitos, síncronos o asíncronos |
 
-No están implementados todavía BM25, fusiones de nodos/paths en Tree,
-rerankers, scheduling concurrente ni aislamiento de fallos por output.
+No están implementados todavía rerankers, scheduling concurrente ni
+aislamiento de fallos por output.
 Los diseños futuros no deben documentarse como capacidades actuales.
 
 ## Estructura real
@@ -42,7 +46,9 @@ src/chunkbuster/
 │   ├── contracts.py
 │   ├── dag.py
 │   ├── models.py
-│   └── ranking.py
+│   ├── normalization.py
+│   ├── ranking.py
+│   └── tokenization.py
 ├── tree_classification/
 │   ├── config.py
 │   ├── decisions.py
@@ -107,6 +113,9 @@ universal ni deep-merge de overrides por request.
 ```text
 preprocessors
 retrievers
+path_scorers
+deciders
+routers
 ```
 
 La clave del mapping coincide con `binding` en la configuración. El objeto no
@@ -131,7 +140,9 @@ acepta un formatter por `RankedItem`; por defecto representa solo identidad e
 item, sin añadir score ni rank. Para `TaxonomyPath`, `str(path)` concatena los
 labels raíz-hoja y omite descripciones y metadata.
 
-La primera estrategia compartida es RRF:
+Las estrategias compartidas son `weighted_rrf`, `weighted_sum` y `comb_mnz`.
+Las dos últimas normalizan cada input con `none`, `min_max` o `z_score`; RRF
+opera sobre posiciones:
 
 ```text
 score(id) = sum(1 / (k + rank_en_cada_input))
@@ -152,17 +163,16 @@ primer orden observado. Requiere al menos dos rankings y aplica su propio
 - calcular alcanzabilidad desde outputs;
 - rechazar nodos declarados pero no utilizados.
 
-No ejecuta negocio ni interpreta tipos. Hoy lo usa Retrieval, donde todos los
-nodos producen `Ranking[Chunk]`. Tree valida directamente su único recorrido;
-generalizar antes de tener fusiones reales añadiría complejidad sin uso.
+No ejecuta negocio ni interpreta tipos. Retrieval y Tree lo usan para validar
+orden, referencias, ciclos y ramas de scoring inalcanzables.
 
 ## TreeClassificationPipeline
 
 ### Dominio e identidad
 
 `Taxonomy` contiene nodos y aristas planos. Un `TaxonomyNode` tiene `id`,
-`label`, `text`, `embedding`, `tokens` y metadata. En esta entrega solo se usa
-`embedding`; `tokens` queda como dato de dominio para el siguiente vertical.
+`label`, `text`, `embedding`, `tokens` y metadata. Dense usa embeddings y BM25
+usa tokens.
 
 La estructura es un bosque estricto:
 
@@ -180,11 +190,13 @@ una taxonomía DAG.
 
 ### Build
 
-El vertical actual exige exactamente:
+El vertical actual exige:
 
-- un preprocessor de embeddings;
-- un node scorer dense;
-- un path scorer `mean`, `weighted_sum` o `custom`;
+- uno o más preprocessors de embeddings o tokens;
+- uno o más node scorers dense o BM25;
+- cero o más node fusions;
+- uno o más path scorers `mean`, `weighted_sum` o `custom`;
+- cero o más path fusions;
 - uno o más deciders alcanzables directa o indirectamente desde `outputs`;
 - cero o más routers terminales que solo pueden seleccionar deciders.
 
@@ -192,7 +204,8 @@ Si todos los nodos traen embeddings, se validan dimensión y finitud. Si ninguno
 los trae, `build()` llama una vez a
 `preprocessor.prepare_documents(tuple[text, ...])` y guarda los vectores en un
 snapshot nuevo. Una cobertura parcial falla para evitar mezclar modelos o
-versiones. El `Taxonomy` entregado por el caller nunca se muta.
+versiones. Si hay tokenizer, solo genera los `tokens` ausentes. El `Taxonomy`
+entregado por el caller nunca se muta.
 
 El preprocessor siempre debe implementar `prepare_query(text)`. El usuario es
 responsable de inyectar el mismo modelo, versión, dimensión y normalización que
@@ -201,13 +214,13 @@ propiedades numéricas.
 
 ### Classify
 
-Para cada query:
+Para cada query se ejecuta la clausura requerida por los outputs pedidos:
 
-1. se genera un embedding;
-2. se puntúa cada nodo con cosine, dot product o euclidean negativo;
+1. se preparan embeddings o tokens;
+2. se puntúan nodos con dense o BM25 y se aplican node fusions opcionales;
 3. cada path recibe la media, una suma ponderada configurable o el score de un
    binding `custom`;
-4. el ranking se ordena determinísticamente y se recorta;
+4. se aplican path fusions opcionales y cada ranking se recorta;
 5. cada output solicitado resuelve su router opcional;
 6. se ejecuta el decider terminal elegido.
 
@@ -220,15 +233,10 @@ unicidad y límite y materializa los paths canónicos. `reason` y `metadata` se
 propagan a `ClassificationDecision`. Una selección vacía produce
 `status="abstained"`.
 
-Un router llama a `route(query, ranking, parameters=...)` con el ranking ya
-recortado por el path scorer y devuelve un nombre de decider o un
-`DecisionRoute`. Sus `parameters` son valores compatibles con JSON definidos
-en la configuración y se entregan como un mapping de solo lectura; el binding
-valida su semántica. El pipeline comprueba que el destino pertenezca a
-`RouterConfig.deciders` antes de ejecutarlo. Routers y decisiones se cachean
-por query, por lo que outputs compartidos no repiten bindings. Los routers no
-pueden seleccionar otros routers, ejecutar componentes ni transformar
-rankings.
+Un router llama a `route(query, rankings, parameters=...)`. `rankings` es un
+mapping de solo lectura entre cada decider permitido y su ranking recortado;
+los deciders pueden consumir ramas distintas. El router devuelve el decider a
+ejecutar, pero no ejecuta ni transforma componentes.
 
 `weighted_sum` admite `root`, niveles posteriores a la raíz mediante `level_n`,
 `mean`, `leaf`, `lowest` y `highest`; la suma no normaliza pesos. `custom`
@@ -265,9 +273,9 @@ El segundo solo puede devolver IDs presentes en `candidates`. El pipeline
 reemplaza cualquier copia del chunk por el objeto canónico de entrada y aplica
 `top_k`.
 
-Una fusion `type: rrf` consume al menos dos rankings nombrados. “Hybrid” no es
-un tipo especial: es simplemente una RRF entre señales diferentes. “Cascade”
-es un retriever cuyo `input` referencia otro ranking.
+Una fusion consume al menos dos rankings nombrados y usa `weighted_rrf`,
+`weighted_sum` o `comb_mnz`. “Hybrid” no es un tipo especial. “Cascade” es un
+retriever cuyo `input` referencia otro ranking.
 
 ### Build y retrieve
 
@@ -315,12 +323,13 @@ No se crean excepciones por cada clase interna.
 Los tests nuevos cubren contratos, no detalles accidentales:
 
 - unicidad y scores finitos de rankings;
-- RRF determinista;
+- tokenización, normalizaciones y fusiones deterministas;
 - bosque, múltiples raíces, ciclos y múltiples padres;
-- embeddings provistos o generados una sola vez;
+- embeddings provistos o generados y tokens parciales completados una vez;
 - path scoring ponderado/custom y selección LLM canonicalizada;
 - carga equivalente desde dict, YAML y JSON;
 - source/candidate retrieval, preprocessing compartido y RRF;
+- weighted score fusion compartida entre Tree y Retrieval;
 - rechazo de IDs inventados y ciclos del DAG.
 
 Una nueva capacidad debe añadir primero el test mínimo que demuestra el
@@ -331,12 +340,11 @@ productos ya exhiben el mismo contrato, no por anticipación.
 
 Orden orientativo, sin promesa de compatibilidad hasta estabilizar la API:
 
-1. Tree lexical: tokenización/BM25, node fusions y ranking fusions.
-2. Transformaciones externas: rerankers y canonicalización común.
-3. Selector LLM de rankings para Retrieval.
-4. Runtime: nodos independientes concurrentes, límites y aislamiento de fallos
+1. Transformaciones externas: rerankers y canonicalización común.
+2. Selector LLM de rankings para Retrieval.
+3. Runtime: nodos independientes concurrentes, límites y aislamiento de fallos
    por output.
-5. Integraciones concretas con embeddings y vectorstores, una por vez.
+4. Integraciones concretas con embeddings y vectorstores, una por vez.
 
 Siguen fuera de alcance hasta que exista un caso medido: plugin discovery,
 workflow engine genérico, taxonomía DAG, persistencia propia, CLI, servidor

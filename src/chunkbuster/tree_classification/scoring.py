@@ -1,14 +1,45 @@
-"""Pure dense and path scoring for the first vertical."""
+"""Pure dense, BM25, node-ranking, and path-scoring functions."""
 
 from __future__ import annotations
 
-from math import isfinite, sqrt
+from collections import Counter
+from collections.abc import Mapping
+from dataclasses import dataclass
+from math import isfinite, log, sqrt
+from types import MappingProxyType
 
 from ..core.ranking import RankedItem, Ranking
 from ..errors import InvalidModelOutputError, PreprocessingError
-from .config import MeanPathScorerConfig, WeightedSumPathScorerConfig
-from .models import TaxonomyPath
+from .config import (
+    BM25NodeScorerConfig,
+    MeanPathScorerConfig,
+    WeightedSumPathScorerConfig,
+)
+from .models import TaxonomyNode, TaxonomyPath
 from .taxonomy import TaxonomySnapshot
+
+type NodeScores = Mapping[str, float]
+
+
+@dataclass(frozen=True, slots=True)
+class BM25Index:
+    document_frequencies: Mapping[str, int]
+    term_frequencies: Mapping[str, Mapping[str, int]]
+    document_lengths: Mapping[str, int]
+    average_document_length: float
+    document_count: int
+
+
+def validate_tokens(value: object, *, label: str) -> tuple[str, ...]:
+    if isinstance(value, str):
+        raise PreprocessingError(f"{label} must be a sequence of tokens")
+    try:
+        tokens = tuple(value)  # type: ignore[arg-type]
+    except TypeError as exc:
+        raise PreprocessingError(f"{label} must be a sequence of tokens") from exc
+    if not all(isinstance(token, str) and token for token in tokens):
+        raise PreprocessingError(f"{label} must contain non-empty strings")
+    return tokens
 
 
 def validate_vector(
@@ -53,6 +84,76 @@ def score_nodes(
         node_id: _similarity(query_embedding, node.embedding or (), similarity)
         for node_id, node in snapshot.nodes_by_id.items()
     }
+
+
+def build_bm25_index(snapshot: TaxonomySnapshot) -> BM25Index:
+    frequencies: Counter[str] = Counter()
+    term_frequencies = {}
+    lengths = {}
+    for node_id, node in snapshot.nodes_by_id.items():
+        tokens = node.tokens or ()
+        frequencies.update(set(tokens))
+        term_frequencies[node_id] = MappingProxyType(dict(Counter(tokens)))
+        lengths[node_id] = len(tokens)
+    return BM25Index(
+        MappingProxyType(dict(frequencies)),
+        MappingProxyType(term_frequencies),
+        MappingProxyType(lengths),
+        sum(lengths.values()) / len(lengths),
+        len(lengths),
+    )
+
+
+def score_bm25_nodes(
+    snapshot: TaxonomySnapshot,
+    index: BM25Index,
+    query_tokens: tuple[str, ...],
+    spec: BM25NodeScorerConfig,
+) -> dict[str, float]:
+    if not query_tokens or index.average_document_length == 0:
+        return {}
+    scores = {}
+    for node_id in snapshot.nodes_by_id:
+        term_frequencies = index.term_frequencies[node_id]
+        length = index.document_lengths[node_id]
+        score = 0.0
+        for token in dict.fromkeys(query_tokens):
+            frequency = term_frequencies.get(token, 0)
+            if not frequency:
+                continue
+            document_frequency = index.document_frequencies[token]
+            inverse_document_frequency = log(
+                1
+                + (index.document_count - document_frequency + 0.5)
+                / (document_frequency + 0.5)
+            )
+            denominator = frequency + spec.k1 * (
+                1 - spec.b + spec.b * length / index.average_document_length
+            )
+            score += (
+                inverse_document_frequency * frequency * (spec.k1 + 1) / denominator
+            )
+        if score > 0:
+            scores[node_id] = score
+    return scores
+
+
+def rank_node_scores(
+    snapshot: TaxonomySnapshot,
+    scores: NodeScores,
+    *,
+    source: str,
+) -> Ranking[TaxonomyNode]:
+    candidates = tuple(
+        RankedItem(node_id, snapshot.nodes_by_id[node_id], score, provenance=(source,))
+        for node_id, score in scores.items()
+    )
+    order = {node_id: index for index, node_id in enumerate(snapshot.nodes_by_id)}
+    return Ranking(
+        tuple(sorted(candidates, key=lambda item: (-item.score, order[item.id]))),
+        source,
+        frozenset({source}),
+    )
 
 
 def builtin_path_score(

@@ -40,7 +40,12 @@ class TaxonomyNode:
                 raise ValueError("taxonomy node embedding must contain finite values")
             object.__setattr__(self, "embedding", vector)
         if self.tokens is not None:
-            object.__setattr__(self, "tokens", tuple(self.tokens))
+            if isinstance(self.tokens, str):
+                raise ValueError("taxonomy node tokens must be a sequence")
+            tokens = tuple(self.tokens)
+            if not all(isinstance(token, str) and token for token in tokens):
+                raise ValueError("taxonomy node tokens must be non-empty strings")
+            object.__setattr__(self, "tokens", tokens)
         object.__setattr__(self, "metadata", _metadata(self.metadata))
 
 

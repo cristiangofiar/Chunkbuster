@@ -32,4 +32,3 @@ class Query:
 def as_query(value: str | Query) -> Query:
     """Normalize the public query shorthand."""
     return Query(value) if isinstance(value, str) else value
-

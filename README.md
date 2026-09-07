@@ -1,33 +1,40 @@
-# chunkbuster
+# Chunkbuster
 
-`chunkbuster` es una librería Python experimental para construir pipelines de
-clasificación jerárquica y retrieval mediante configuración estricta y
-componentes Python inyectados explícitamente.
+**Diseña retrieval y clasificación jerárquica como grafos declarativos.**
 
-La API todavía puede cambiar. Esta primera entrega implementa dos verticales
-pequeños de extremo a extremo:
+Tu estrategia de ranking debería cambiar en YAML, no quedar repartida por todo
+el código. Chunkbuster separa la topología del pipeline de las tecnologías que
+la ejecutan: conecta tus modelos, índices y reglas como bindings Python;
+combínalos y publica varios resultados sin acoplarte a un proveedor.
 
-| Producto | Implementado ahora |
-|---|---|
-| `TreeClassificationPipeline` | Bosque estricto, embeddings densos, path scoring configurable, routers y deciders deterministas o LLM |
-| `RetrievalPipeline` | Retrievers fuente, retrievers restringidos por candidatos, fusión RRF y múltiples outputs |
+> Estado: `0.3.0`, API experimental. Requiere Python 3.12 o superior.
 
-No se incluyen SDKs, modelos, vectorstores ni credenciales. Esos objetos se
-inyectan mediante `ComponentBindings`; la configuración solo describe cómo se
-conectan.
+| Producto | Para qué sirve | Qué combina |
+|---|---|---|
+| `RetrievalPipeline` | Recuperar, filtrar y ordenar chunks | Fuentes, etapas restringidas y fusiones |
+| `TreeClassificationPipeline` | Elegir paths de una taxonomía | Dense/BM25, scoring de paths, fusiones, reglas y LLMs |
 
-## Instalación local
+## Por qué Chunkbuster
 
-Requiere Python 3.12 o superior.
+- **Híbrido de verdad:** dense y sparse pueden convivir antes y después de
+  construir rankings.
+- **Configurable sin magia:** YAML describe el grafo; Python implementa solo
+  las integraciones externas.
+- **Seguro al construir:** referencias rotas, ciclos, nombres duplicados y
+  ramas sin salida fallan antes de procesar tráfico.
+- **Proveedor agnóstico:** trae tu vectorstore, buscador, modelo de embeddings o
+  LLM. Chunkbuster no gestiona SDKs, credenciales ni secretos.
+- **Contratos pequeños:** bindings síncronos y asíncronos; resultados tipados e
+  inmutables.
 
-Con uv:
+## Instalación
 
 ```bash
 uv sync --dev
 uv run pytest
 ```
 
-Con pip:
+O con `pip`:
 
 ```bash
 python -m venv .venv
@@ -36,23 +43,197 @@ python -m pip install -e .
 pytest
 ```
 
-El paquete distribuible vive bajo `src/chunkbuster`.
+## El modelo mental
 
-## Tree classification
-
-Una taxonomía es un bosque: puede tener varias raíces, pero cada nodo no raíz
-tiene exactamente un padre. Cada hoja define una clase identificada por su path
-completo desde la raíz.
-
-Este ejemplo deja que `build()` genere los embeddings ausentes una sola vez:
+La configuración responde **qué se conecta**. Los bindings responden **cómo se
+ejecuta**.
 
 ```python
-import asyncio
+pipeline = await SomePipeline.build(
+    config="pipeline.yaml",
+    bindings=ComponentBindings(...),
+)
+```
 
+El valor de cada `binding` en YAML busca una clave dentro de
+`ComponentBindings`. Así puedes sustituir Pinecone por pgvector, Elasticsearch
+por OpenSearch o un LLM por una regla local sin rediseñar el grafo.
+
+¿Quieres pasar de estos ejemplos mínimos a cascadas, búsqueda híbrida, fusión
+de rankings y routing? Consulta la guía progresiva de [ejemplos
+avanzados](EXAMPLES.md).
+
+## Retrieval mínimo
+
+Una query, una fuente y un output: el pipeline más corto útil.
+
+```mermaid
+flowchart LR
+    query([Query])
+
+    subgraph preprocessors[Preprocessors]
+        query_text[query_text]
+    end
+
+    subgraph retrievers[Retrievers]
+        catalog["catalog<br/>source"]
+    end
+
+    subgraph outputs[Outputs]
+        primary([primary])
+    end
+
+    subgraph bindings[Bindings]
+        normalize_query[normalize_query]
+        catalog_search[catalog_search]
+    end
+
+    query --> query_text --> catalog --> primary
+    normalize_query -.-> query_text
+    catalog_search -.-> catalog
+```
+
+`retrieval-simple.yaml`:
+
+```yaml
+version: 1
+name: catalog_search
+kind: retrieve
+
+preprocessors:
+  - name: query_text
+    binding: normalize_query
+
+retrievers:
+  - name: catalog
+    binding: catalog_search
+    preprocessor: query_text
+    top_k: 10
+
+outputs:
+  primary: catalog
+```
+
+Bindings y ejecución:
+
+```python
+from chunkbuster import ComponentBindings, RankedItem, Ranking
+from chunkbuster.retrieval import Chunk, RetrievalPipeline
+
+
+class NormalizeQuery:
+    def prepare_query(self, text):
+        return text.casefold().strip()
+
+
+class CatalogSearch:
+    def __init__(self, client):
+        self.client = client
+
+    async def retrieve(self, query, *, top_k):
+        hits = await self.client.search(query, limit=top_k)
+        return Ranking(
+            tuple(
+                RankedItem(
+                    hit.id,
+                    Chunk(hit.id, hit.text, hit.metadata),
+                    hit.score,
+                )
+                for hit in hits
+            )
+        )
+
+
+bindings = ComponentBindings(
+    preprocessors={"normalize_query": NormalizeQuery()},
+    retrievers={"catalog_search": CatalogSearch(search_client)},
+)
+
+pipeline = await RetrievalPipeline.build(
+    config="retrieval-simple.yaml",
+    bindings=bindings,
+)
+result = await pipeline.retrieve("Auriculares inalámbricos")
+print(result.outputs["primary"].ranking.ids)
+```
+
+## Clasificación semántica mínima
+
+Una taxonomía es un bosque. Cada hoja define una clase mediante su path desde
+la raíz. En este ejemplo, `build()` genera una vez los embeddings ausentes de
+los nodos; cada query se compara semánticamente contra ellos.
+
+```mermaid
+flowchart LR
+    query([Query])
+
+    subgraph preprocessors[Preprocessors]
+        semantic["semantic<br/>embedding"]
+    end
+
+    subgraph node_scorers[Node scorers]
+        dense_nodes["dense_nodes<br/>cosine"]
+    end
+
+    subgraph path_scorers[Path scorers]
+        mean_paths["mean_paths<br/>mean"]
+    end
+
+    subgraph deciders[Deciders]
+        best_path["best_path<br/>top_one"]
+    end
+
+    subgraph outputs[Outputs]
+        primary([primary])
+    end
+
+    subgraph bindings[Bindings]
+        embeddings[embeddings]
+    end
+
+    query --> semantic --> dense_nodes --> mean_paths --> best_path --> primary
+    embeddings -.-> semantic
+```
+
+`tree-simple.yaml`:
+
+```yaml
+version: 1
+name: support_semantic
+kind: tree_classification
+
+preprocessors:
+  - name: semantic
+    type: embedding
+    binding: embeddings
+    dimensions: 3
+
+node_scorers:
+  - name: dense_nodes
+    type: dense
+    preprocessor: semantic
+    similarity: cosine
+
+path_scorers:
+  - name: mean_paths
+    type: mean
+    input: dense_nodes
+    top_k: 10
+
+deciders:
+  - name: best_path
+    type: top_one
+    input: mean_paths
+
+outputs:
+  primary: best_path
+```
+
+Taxonomía, binding y ejecución:
+
+```python
 from chunkbuster import (
     ComponentBindings,
-    DecisionRoute,
-    DecisionSelection,
     Taxonomy,
     TaxonomyEdge,
     TaxonomyNode,
@@ -60,373 +241,99 @@ from chunkbuster import (
 )
 
 
-class FakeEmbeddings:
-    vectors = {
-        "Productos": (1.0, 0.0),
-        "Reembolsos": (1.0, 0.0),
-        "Acceso": (0.0, 1.0),
-    }
+class Embeddings:
+    def __init__(self, model):
+        self.model = model
 
     async def prepare_documents(self, texts):
-        return tuple(self.vectors[text] for text in texts)
+        return await self.model.embed_many(texts, dimensions=3)
 
     async def prepare_query(self, text):
-        return (1.0, 0.0)
+        return await self.model.embed(text, dimensions=3)
 
 
 taxonomy = Taxonomy(
     id="support",
     nodes=(
-        TaxonomyNode("products", "Productos"),
+        TaxonomyNode("support", "Soporte"),
+        TaxonomyNode("billing", "Facturación"),
         TaxonomyNode("refunds", "Reembolsos"),
         TaxonomyNode("access", "Acceso"),
     ),
     edges=(
-        TaxonomyEdge("products", "refunds"),
-        TaxonomyEdge("products", "access"),
+        TaxonomyEdge("support", "billing"),
+        TaxonomyEdge("billing", "refunds"),
+        TaxonomyEdge("support", "access"),
     ),
 )
 
-config = {
-    "version": 1,
-    "name": "support_classifier",
-    "kind": "tree_classification",
-    "preprocessors": [
-        {
-            "name": "semantic",
-            "type": "embedding",
-            "binding": "fake_embeddings",
-            "dimensions": 2,
-        }
-    ],
-    "node_scorers": [
-        {
-            "name": "dense_nodes",
-            "type": "dense",
-            "preprocessor": "semantic",
-            "similarity": "cosine",
-        }
-    ],
-    "path_scorers": [
-        {"name": "mean_paths", "type": "mean", "input": "dense_nodes", "top_k": 10}
-    ],
-    "deciders": [
-        {"name": "best", "type": "top_one", "input": "mean_paths"}
-    ],
-    "outputs": {"primary": "best"},
-}
+bindings = ComponentBindings(
+    preprocessors={"embeddings": Embeddings(embedding_model)},
+)
 
-
-async def main():
-    pipeline = await TreeClassificationPipeline.build(
-        taxonomy=taxonomy,
-        config=config,
-        bindings=ComponentBindings(
-            preprocessors={"fake_embeddings": FakeEmbeddings()}
-        ),
-    )
-    result = await pipeline.classify("¿Dónde está mi devolución?")
-    print(result.outputs["primary"].selected[0].item.node_ids)
-
-
-asyncio.run(main())  # ('products', 'refunds')
+pipeline = await TreeClassificationPipeline.build(
+    taxonomy=taxonomy,
+    config="tree-simple.yaml",
+    bindings=bindings,
+)
+result = await pipeline.classify("Necesito un reembolso")
+print(result.outputs["primary"].selected[0].item.node_ids)
 ```
 
-Si cada nodo ya trae `embedding`, `prepare_documents()` no se invoca. La
-cobertura debe ser completa: mezclar nodos con y sin embedding falla durante
+Si los nodos ya contienen embeddings, `prepare_documents()` no se ejecuta. La
+cobertura debe ser completa: todos presentes o todos generados durante
 `build()`.
 
-### Path scoring configurable
+## Capacidades incluidas
 
-`mean` conserva la media aritmética original. `weighted_sum` permite sumar
-componentes ponderados con una clave por término. `root` representa la raíz;
-`level_1` es el primer nodo posterior a ella; también están disponibles `mean`,
-`leaf`, `lowest` y `highest`. Los pesos no se normalizan automáticamente.
+### Fusiones compartidas
 
-```python
-"path_scorers": [
-    {
-        "name": "weighted_paths",
-        "type": "weighted_sum",
-        "input": "dense_nodes",
-        "terms": [
-            {"root": 0.1},
-            {"level_1": 0.4},
-            {"level_2": 0.1},
-            {"mean": 0.1},
-            {"leaf": 0.1},
-            {"lowest": 0.1},
-            {"highest": 0.1},
-        ],
-        "top_k": 10,
-    }
-]
-```
+| Método | Cuándo usarlo | Normalización |
+|---|---|---|
+| `weighted_rrf` | Los scores no son comparables o solo confías en el orden | No aplica |
+| `weighted_sum` | Los scores representan señales calibrables | `none`, `min_max`, `z_score` |
+| `comb_mnz` | Quieres premiar candidatos respaldados por varias señales | `none`, `min_max`, `z_score` |
 
-Para una fórmula que no pueda expresarse así, use `type: custom` y un binding
-con `score_path(path, node_scores) -> float`. `node_scores` conserva el orden
-de los nodos del path y el método puede ser síncrono o asíncrono.
+Retrieval conserva `rrf` como alias compatible de `weighted_rrf`.
 
-```python
-class MyPathScorer:
-    def score_path(self, path, node_scores):
-        return 0.7 * node_scores[-1] + 0.3 * min(node_scores)
+### Tree Classification
 
+| Etapa | Opciones incluidas |
+|---|---|
+| Node scorer | `dense` (`cosine`, `dot_product`, `euclidean`), `bm25` |
+| Node fusion | `weighted_rrf`, `weighted_sum`, `comb_mnz` |
+| Path scorer | `mean`, `weighted_sum`, `custom` |
+| Path fusion | `weighted_rrf`, `weighted_sum`, `comb_mnz` |
+| Decider | `top_one`, `top_k`, `threshold`, `llm` |
+| Terminal | decider directo o router entre deciders |
 
-custom_path_config = {
-    "name": "custom_paths",
-    "type": "custom",
-    "binding": "my_path_scorer",
-    "input": "dense_nodes",
-    "top_k": 10,
-}
+## Contratos de bindings
 
-bindings = ComponentBindings(
-    preprocessors={"fake_embeddings": FakeEmbeddings()},
-    path_scorers={"my_path_scorer": MyPathScorer()},
-)
-```
+| Binding | Método requerido | Devuelve |
+|---|---|---|
+| Preprocessor de query | `prepare_query(text)` | Representación aceptada por el consumidor |
+| Preprocessor de documentos | `prepare_documents(texts)` | Una representación por texto |
+| Retriever fuente | `retrieve(query, *, top_k)` | `Ranking[Chunk]` |
+| Retriever restringido | `retrieve_candidates(query, candidates, *, top_k)` | Subconjunto de `Ranking[Chunk]` |
+| Path scorer custom | `score_path(path, node_scores)` | `float` finito |
+| Decider LLM | `decide(query, candidates, *, count)` | `DecisionSelection` |
+| Router | `route(query, candidates, *, parameters)` | Nombre de decider o `DecisionRoute` |
 
-### LLM decider
+Todos pueden ser síncronos o asíncronos. La configuración acepta un `Mapping`,
+una ruta `.yaml`/`.yml`, una ruta `.json` o un modelo Pydantic ya validado. Las
+claves desconocidas fallan.
 
-Un decider `llm` recibe la `Query`, un `Ranking[TaxonomyPath]` con **todos** los
-paths puntuados y el `count` máximo. El binding debe devolver un
-`DecisionSelection`; Chunkbuster rechaza IDs desconocidos, duplicados o
-selecciones por encima de `count`, y siempre publica los objetos `TaxonomyPath`
-canónicos. `reason` y `metadata` se conservan en `ClassificationDecision`.
+## Siguiente paso
 
-```python
-class MyLLMDecider:
-    async def decide(self, query, candidates, *, count):
-        # El adapter llama al proveedor y valida/extrae su salida estructurada.
-        return DecisionSelection(
-            path_ids=(candidates.items[0].id,),
-            reason="Es el path que mejor responde la consulta",
-            metadata={"validation_used": True, "retry": 0},
-        )
+- Sigue la evolución completa en [EXAMPLES.md](EXAMPLES.md): cascadas,
+  retrieval híbrido, BM25, node/path fusion, deciders y routers.
+- Consulta [ARCHITECTURE.md](ARCHITECTURE.md) para contratos internos,
+  invariantes y límites del runtime.
 
+## Alcance actual
 
-llm_config = {
-    "name": "llm_choice",
-    "type": "llm",
-    "binding": "my_llm",
-    "input": "weighted_paths",
-    "count": 1,
-}
+Chunkbuster orquesta ranking; no reemplaza tu stack. Todavía no incluye
+integraciones oficiales con proveedores, persistencia, índices incrementales,
+servidor HTTP, CLI, ejecución concurrente ni aislamiento de fallos por output.
 
-bindings = ComponentBindings(
-    preprocessors={"fake_embeddings": FakeEmbeddings()},
-    deciders={"my_llm": MyLLMDecider()},
-)
-```
-
-### Formateo de rankings
-
-`Ranking.to_text()` conserva el orden actual de los candidatos. Para paths, el
-formato predeterminado muestra únicamente el ID canónico y los labels desde la
-raíz hasta la hoja; no expone score, rank, metadata ni `text`:
-
-```text
-- ["products","refunds"]: Productos > Reembolsos
-- ["products","access"]: Productos > Acceso
-```
-
-Un formatter opcional recibe el `RankedItem` completo y controla cada línea:
-
-```python
-def verbose_path(candidate):
-    descriptions = " > ".join(
-        node.text or node.label for node in candidate.item.nodes
-    )
-    return f"{candidate.rank}. {descriptions} ({candidate.score})"
-
-
-text = candidates.to_text(verbose_path)
-```
-
-Esta utilidad solo produce texto; no construye prompts ni modifica el contrato
-de los deciders.
-
-### Routers
-
-Un router terminal inspecciona la query y el ranking recortado por el path
-scorer, y elige exactamente uno de sus deciders autorizados. Puede devolver el
-nombre directamente o un `DecisionRoute`; el pipeline valida la elección y
-ejecuta el decider. El router nunca recibe ni ejecuta componentes.
-
-```python
-class ConfidenceRouter:
-    def route(self, query, candidates, *, parameters):
-        if candidates and candidates[0].score >= parameters["top_1_threshold"]:
-            return "return_top_1"
-        if (
-            len(candidates) >= 3
-            and candidates[2].score >= parameters["top_3_threshold"]
-        ):
-            return DecisionRoute("return_top_3")
-        return "llm_choice"
-
-
-router_config = {
-    "name": "confidence_gate",
-    "deciders": ["return_top_1", "return_top_3", "llm_choice"],
-    "binding": "confidence_router",
-    "parameters": {
-        "top_1_threshold": 0.85,
-        "top_3_threshold": 0.70,
-    },
-}
-
-bindings = ComponentBindings(
-    preprocessors={"fake_embeddings": FakeEmbeddings()},
-    deciders={"my_llm": MyLLMDecider()},
-    routers={"confidence_router": ConfidenceRouter()},
-)
-```
-
-Un output puede apuntar directamente a un decider o a un router:
-
-```python
-"routers": [router_config],
-"outputs": {
-    "direct": "return_top_1",
-    "routed": "confidence_gate",
-},
-```
-
-Bindings síncronos y asíncronos están soportados. Si dos outputs terminan en el
-mismo decider, este se ejecuta una sola vez por query. El decider LLM conserva
-su comportamiento: recibe todos los paths puntuados. `parameters` admite
-valores compatibles con JSON y llega como un mapping de solo lectura; si se
-omite, el binding recibe `{}`. Chunkbuster valida su estructura, mientras que
-el binding valida el significado y los campos que necesita.
-
-## Retrieval
-
-Un retriever fuente introduce chunks. Un retriever con `input` solo puede
-filtrar o reordenar los candidatos recibidos. Las fusiones RRF combinan dos o
-más rankings por identidad.
-
-```python
-import asyncio
-
-from chunkbuster import ComponentBindings, RankedItem, Ranking
-from chunkbuster.retrieval import Chunk, RetrievalPipeline
-
-
-def ranking(*ids):
-    return Ranking(
-        tuple(
-            RankedItem(item_id, Chunk(item_id, f"chunk {item_id}"), 1.0 / rank)
-            for rank, item_id in enumerate(ids, 1)
-        )
-    )
-
-
-class FakeQueryPreprocessor:
-    async def prepare_query(self, text):
-        return text.casefold()
-
-
-class FakeSource:
-    def __init__(self, result):
-        self.result = result
-
-    async def retrieve(self, query, *, top_k):
-        return self.result.top(top_k)
-
-
-class FakeCandidateFilter:
-    async def retrieve_candidates(self, query, candidates, *, top_k):
-        return Ranking(tuple(item for item in candidates if item.id == "b"))
-
-
-config = {
-    "version": 1,
-    "name": "products",
-    "kind": "retrieve",
-    "preprocessors": [{"name": "shared", "binding": "query_text"}],
-    "retrievers": [
-        {
-            "name": "catalog_a",
-            "binding": "source_a",
-            "preprocessor": "shared",
-            "top_k": 10,
-        },
-        {
-            "name": "catalog_b",
-            "binding": "source_b",
-            "preprocessor": "shared",
-            "top_k": 10,
-        },
-        {
-            "name": "filtered_a",
-            "binding": "candidate_filter",
-            "preprocessor": "shared",
-            "input": "catalog_a",
-            "top_k": 5,
-        },
-    ],
-    "fusions": [
-        {
-            "name": "combined",
-            "type": "rrf",
-            "inputs": ["filtered_a", "catalog_b"],
-            "k": 60,
-            "top_k": 3,
-        }
-    ],
-    "outputs": {"primary": "combined"},
-}
-
-
-async def main():
-    pipeline = await RetrievalPipeline.build(
-        config=config,
-        bindings=ComponentBindings(
-            preprocessors={"query_text": FakeQueryPreprocessor()},
-            retrievers={
-                "source_a": FakeSource(ranking("a", "b")),
-                "source_b": FakeSource(ranking("b", "c")),
-                "candidate_filter": FakeCandidateFilter(),
-            },
-        ),
-    )
-    result = await pipeline.retrieve("productos")
-    print(result.outputs["primary"].ranking.ids)
-
-
-asyncio.run(main())  # ('b', 'c')
-```
-
-## Configuración y bindings
-
-`build(config=...)` acepta el mismo esquema como:
-
-- `dict` o cualquier `Mapping` de Python;
-- ruta `.yaml` o `.yml`;
-- ruta `.json`;
-- modelo Pydantic de configuración ya validado.
-
-Las claves desconocidas fallan. Un archivo describe un pipeline y sus
-referencias; no contiene código, clientes ni secretos. El campo `binding`
-resuelve el objeto concreto dentro de `ComponentBindings`.
-
-Los adapters pueden ser síncronos o asíncronos. Deben devolver los objetos
-tipados de la librería. Un retriever restringido no puede inventar IDs fuera de
-su input.
-
-## Limitaciones actuales
-
-Esta entrega es deliberadamente pequeña. Todavía no implementa:
-
-- BM25 ni tokenización;
-- node fusions o ranking fusions en Tree;
-- rerankers;
-- ejecución concurrente o límites de concurrencia;
-- aislamiento de fallos por output;
-- integraciones con proveedores o vectorstores;
-- persistencia, índices incrementales, CLI o servidor HTTP.
-
-Consulte [ARCHITECTURE.md](ARCHITECTURE.md) para contratos internos, estado del
-diseño y próximos verticales.
+La API es experimental y puede cambiar.

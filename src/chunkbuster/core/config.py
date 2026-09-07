@@ -11,7 +11,7 @@ from typing import Any
 import yaml
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ..errors import ConfigurationError
+from ..errors import BuildError, ConfigurationError
 
 ConfigInput = str | Path | Mapping[str, Any] | BaseModel
 
@@ -20,6 +20,14 @@ class StrictConfig(BaseModel):
     """Immutable base for product-specific configurations."""
 
     model_config = ConfigDict(extra="forbid", frozen=True, allow_inf_nan=False)
+
+
+def by_name(values, *, label: str):
+    """Index named config values and reject duplicates."""
+    result = {value.name: value for value in values}
+    if len(result) != len(values):
+        raise BuildError(f"{label} names must be unique")
+    return result
 
 
 def load_config[ConfigModel: BaseModel](

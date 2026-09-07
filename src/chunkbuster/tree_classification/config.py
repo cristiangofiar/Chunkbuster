@@ -4,9 +4,10 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, JsonValue, field_validator
+from pydantic import Field, JsonValue, field_validator, model_validator
 
 from ..core.config import StrictConfig
+from ..core.normalization import Normalization
 
 Name = Annotated[str, Field(min_length=1)]
 PositiveInt = Annotated[int, Field(gt=0)]
@@ -19,11 +20,51 @@ class EmbeddingPreprocessorConfig(StrictConfig):
     dimensions: PositiveInt
 
 
+class TokenizerPreprocessorConfig(StrictConfig):
+    name: Name
+    type: Literal["tokenizer"] = "tokenizer"
+    binding: Name
+
+
+PreprocessorConfig = Annotated[
+    EmbeddingPreprocessorConfig | TokenizerPreprocessorConfig,
+    Field(discriminator="type"),
+]
+
+
 class DenseNodeScorerConfig(StrictConfig):
     name: Name
     type: Literal["dense"] = "dense"
     preprocessor: Name
     similarity: Literal["cosine", "dot_product", "euclidean"] = "cosine"
+
+
+class BM25NodeScorerConfig(StrictConfig):
+    name: Name
+    type: Literal["bm25"] = "bm25"
+    preprocessor: Name
+    k1: Annotated[float, Field(ge=0)] = 1.2
+    b: Annotated[float, Field(ge=0, le=1)] = 0.75
+
+
+NodeScorerConfig = Annotated[
+    DenseNodeScorerConfig | BM25NodeScorerConfig,
+    Field(discriminator="type"),
+]
+
+
+class NodeFusionConfig(StrictConfig):
+    name: Name
+    type: Literal["weighted_rrf", "weighted_sum", "comb_mnz"]
+    inputs: Annotated[tuple[Name, ...], Field(min_length=2)]
+    weights: tuple[Annotated[float, Field(ge=0)], ...] = ()
+    normalization: Normalization = "none"
+    k: PositiveInt = 60
+
+    @model_validator(mode="after")
+    def validate_fusion(self) -> NodeFusionConfig:
+        _validate_fusion(self)
+        return self
 
 
 class MeanPathScorerConfig(StrictConfig):
@@ -74,6 +115,21 @@ PathScorerConfig = Annotated[
     MeanPathScorerConfig | WeightedSumPathScorerConfig | CustomPathScorerConfig,
     Field(discriminator="type"),
 ]
+
+
+class PathFusionConfig(StrictConfig):
+    name: Name
+    type: Literal["weighted_rrf", "weighted_sum", "comb_mnz"]
+    inputs: Annotated[tuple[Name, ...], Field(min_length=2)]
+    weights: tuple[Annotated[float, Field(ge=0)], ...] = ()
+    normalization: Normalization = "none"
+    k: PositiveInt = 60
+    top_k: PositiveInt = 20
+
+    @model_validator(mode="after")
+    def validate_fusion(self) -> PathFusionConfig:
+        _validate_fusion(self)
+        return self
 
 
 class TopOneDeciderConfig(StrictConfig):
@@ -129,9 +185,22 @@ class TreeClassificationConfig(StrictConfig):
     version: Literal[1] = 1
     name: Name
     kind: Literal["tree_classification"] = "tree_classification"
-    preprocessors: tuple[EmbeddingPreprocessorConfig, ...]
-    node_scorers: tuple[DenseNodeScorerConfig, ...]
+    preprocessors: tuple[PreprocessorConfig, ...]
+    node_scorers: tuple[NodeScorerConfig, ...]
+    node_fusions: tuple[NodeFusionConfig, ...] = ()
     path_scorers: tuple[PathScorerConfig, ...]
+    path_fusions: tuple[PathFusionConfig, ...] = ()
     deciders: tuple[DeciderConfig, ...]
     routers: tuple[RouterConfig, ...] = ()
     outputs: dict[Name, Name]
+
+
+def _validate_fusion(spec: NodeFusionConfig | PathFusionConfig) -> None:
+    if len(spec.inputs) != len(set(spec.inputs)):
+        raise ValueError("fusion input names must be unique")
+    if spec.weights and len(spec.weights) != len(spec.inputs):
+        raise ValueError("fusion weights must match inputs")
+    if spec.weights and not any(spec.weights):
+        raise ValueError("fusion requires at least one positive weight")
+    if spec.type == "weighted_rrf" and spec.normalization != "none":
+        raise ValueError("weighted_rrf does not accept score normalization")

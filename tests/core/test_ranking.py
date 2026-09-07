@@ -4,7 +4,12 @@ import math
 
 import pytest
 
-from chunkbuster.core.ranking import RankedItem, Ranking, reciprocal_rank_fusion
+from chunkbuster.core.ranking import (
+    RankedItem,
+    Ranking,
+    fuse_rankings,
+    reciprocal_rank_fusion,
+)
 
 
 def test_ranking_rejects_duplicate_ids() -> None:
@@ -33,11 +38,14 @@ def test_ranking_to_text_is_minimal_ordered_and_customizable() -> None:
 
     assert ranking.to_text() == "- a: Alpha\n- b: Beta"
     assert Ranking().to_text() == ""
-    assert ranking.to_text(
-        lambda candidate: (
-            f"{candidate.rank}|{candidate.score}|{dict(candidate.metadata)}"
+    assert (
+        ranking.to_text(
+            lambda candidate: (
+                f"{candidate.rank}|{candidate.score}|{dict(candidate.metadata)}"
+            )
         )
-    ) == "1|0.9|{'source': 'dense'}\n2|0.7|{}"
+        == "1|0.9|{'source': 'dense'}\n2|0.7|{}"
+    )
 
 
 def test_rrf_combines_by_identity_and_preserves_deterministic_order() -> None:
@@ -69,3 +77,54 @@ def test_rrf_combines_by_identity_and_preserves_deterministic_order() -> None:
     assert fused[2].score == pytest.approx(1 / 12)
     assert fused.origins == frozenset({"dense", "sparse"})
     assert all(item.provenance[-1] == "rrf" for item in fused)
+
+
+def test_shared_weighted_score_fusions() -> None:
+    dense = Ranking(
+        (
+            RankedItem("a", "A", 3),
+            RankedItem("b", "B", 2),
+            RankedItem("c", "C", 1),
+        ),
+        origins=frozenset({"dense"}),
+    )
+    sparse = Ranking(
+        (RankedItem("b", "B", 4), RankedItem("c", "C", 3)),
+        origins=frozenset({"sparse"}),
+    )
+
+    summed = fuse_rankings(
+        {"dense": dense, "sparse": sparse},
+        method="weighted_sum",
+        normalization="min_max",
+        top_k=3,
+    )
+    consensus = fuse_rankings(
+        {"dense": dense, "sparse": sparse},
+        method="comb_mnz",
+        normalization="min_max",
+        top_k=3,
+    )
+    weighted_rrf = fuse_rankings(
+        {"dense": dense, "sparse": sparse},
+        method="weighted_rrf",
+        weights={"dense": 1, "sparse": 2},
+        top_k=3,
+        k=10,
+    )
+
+    assert summed.ids == ("b", "a", "c")
+    assert consensus[0].id == "b"
+    assert consensus[0].score == pytest.approx(summed[0].score * 2)
+    assert weighted_rrf[0].id == "b"
+
+    sparse_single = Ranking((RankedItem("c", "C", 4),))
+    with_zero_baseline = fuse_rankings(
+        {"dense": dense, "sparse": sparse_single},
+        method="weighted_sum",
+        normalization="min_max",
+        normalize_missing_as_zero=True,
+        top_k=3,
+    )
+    assert with_zero_baseline[0].id in {"a", "c"}
+    assert next(item for item in with_zero_baseline if item.id == "c").score == 1

@@ -8,4 +8,3 @@ from typing import Any
 
 async def resolve(value: Any) -> Any:
     return await value if isawaitable(value) else value
-

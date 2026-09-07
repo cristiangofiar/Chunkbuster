@@ -1,6 +1,6 @@
 """Public API for chunkbuster."""
 
-from .core import ComponentBindings, Query, RankedItem, Ranking
+from .core import ComponentBindings, Query, RankedItem, Ranking, TextTokenizer
 from .retrieval import (
     Chunk,
     RetrievalOutput,
@@ -35,6 +35,7 @@ __all__ = [
     "TaxonomyEdge",
     "TaxonomyNode",
     "TaxonomyPath",
+    "TextTokenizer",
     "TreeClassificationPipeline",
     "TreeClassificationResult",
 ]

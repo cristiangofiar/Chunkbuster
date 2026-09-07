@@ -9,6 +9,7 @@ from types import MappingProxyType
 from typing import Any
 
 from ..errors import InvalidModelOutputError
+from .normalization import Normalization, normalize_scores
 
 
 @dataclass(frozen=True, slots=True)
@@ -117,31 +118,84 @@ def reciprocal_rank_fusion[Item](
         raise ValueError("rrf requires at least two rankings")
     if top_k <= 0 or k <= 0:
         raise ValueError("rrf top_k and k must be positive")
+    return fuse_rankings(
+        rankings,
+        method="rrf",
+        top_k=top_k,
+        k=k,
+    )
+
+
+def fuse_rankings[Item](
+    rankings: Mapping[str, Ranking[Item]],
+    *,
+    method: str,
+    top_k: int,
+    weights: Mapping[str, float] | None = None,
+    normalization: Normalization = "none",
+    k: int = 60,
+    normalize_missing_as_zero: bool = False,
+) -> Ranking[Item]:
+    """Fuse rankings by rank, normalized score sum, or score consensus."""
+    if len(rankings) < 2:
+        raise ValueError("fusion requires at least two rankings")
+    if top_k <= 0:
+        raise ValueError("fusion top_k must be positive")
+    weights = dict(weights or {name: 1.0 for name in rankings})
+    if set(weights) != set(rankings):
+        raise ValueError("fusion weights must match ranking names")
+    if any(not isfinite(weight) or weight < 0 for weight in weights.values()):
+        raise ValueError("fusion weights must be finite and non-negative")
+    if not any(weights.values()):
+        raise ValueError("fusion requires at least one positive weight")
+
+    if method in {"rrf", "weighted_rrf"}:
+        if normalization != "none":
+            raise ValueError("weighted_rrf does not accept score normalization")
+        if k <= 0:
+            raise ValueError("rrf k must be positive")
+        scores = {
+            name: {item.id: weights[name] / (k + item.rank) for item in ranking}
+            for name, ranking in rankings.items()
+        }
+    elif method in {"weighted_sum", "comb_mnz"}:
+        scores = {}
+        known_ids = {item.id for ranking in rankings.values() for item in ranking}
+        for name, ranking in rankings.items():
+            missing = len(known_ids) - len(ranking) if normalize_missing_as_zero else 0
+            raw_scores = tuple(item.score for item in ranking) + (0.0,) * missing
+            normalized = normalize_scores(raw_scores, normalization)[: len(ranking)]
+            scores[name] = {
+                item.id: weights[name] * score
+                for item, score in zip(ranking, normalized, strict=True)
+            }
+    else:
+        raise ValueError(f"unknown ranking fusion {method!r}")
 
     totals: dict[str, float] = {}
     examples: dict[str, RankedItem[Item]] = {}
     seen_order: dict[str, int] = {}
     origins: set[str] = set()
-    next_order = 0
-    for _source, ranking in rankings.items():
+    for name, ranking in rankings.items():
         origins.update(ranking.origins)
         for item in ranking:
-            totals[item.id] = totals.get(item.id, 0.0) + 1.0 / (k + item.rank)
+            totals[item.id] = totals.get(item.id, 0.0) + scores[name][item.id]
             examples.setdefault(item.id, item)
-            if item.id not in seen_order:
-                seen_order[item.id] = next_order
-                next_order += 1
+            seen_order.setdefault(item.id, len(seen_order))
+    if method == "comb_mnz":
+        memberships = tuple(set(ranking.ids) for ranking in rankings.values())
+        for item_id in totals:
+            totals[item_id] *= sum(item_id in ids for ids in memberships)
 
     ordered = sorted(
-        totals,
-        key=lambda item_id: (-totals[item_id], seen_order[item_id]),
+        totals, key=lambda item_id: (-totals[item_id], seen_order[item_id])
     )
     items = tuple(
         replace(
             examples[item_id],
             score=totals[item_id],
-            provenance=examples[item_id].provenance + ("rrf",),
+            provenance=examples[item_id].provenance + (method,),
         )
         for item_id in ordered[:top_k]
     )
-    return Ranking(items, "rrf", frozenset(origins))
+    return Ranking(items, method, frozenset(origins))

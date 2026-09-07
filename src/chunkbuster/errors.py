@@ -31,4 +31,3 @@ class RetrievalError(ExecutionError):
 
 class InvalidModelOutputError(ExecutionError):
     """An external component returned identities outside its input."""
-

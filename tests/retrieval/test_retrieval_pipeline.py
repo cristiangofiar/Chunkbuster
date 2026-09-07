@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from chunkbuster.core import ComponentBindings, RankedItem, Ranking
-from chunkbuster.errors import BuildError, InvalidModelOutputError
+from chunkbuster.errors import BuildError, ConfigurationError, InvalidModelOutputError
 from chunkbuster.retrieval import Chunk, RetrievalPipeline
 
 
@@ -106,6 +106,68 @@ async def test_source_candidate_rrf_outputs_and_shared_preprocessing() -> None:
     assert result.outputs["primary"].ranking.ids == ("b", "c")
     assert result.outputs["cascade"].ranking.ids == ("b",)
     assert result.outputs["primary"].status == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method", "extra"),
+    (
+        ("weighted_rrf", {"weights": [1, 2], "k": 10}),
+        ("weighted_sum", {"weights": [1, 2], "normalization": "min_max"}),
+        ("comb_mnz", {"normalization": "min_max"}),
+    ),
+)
+async def test_shared_fusion_methods_are_available_in_retrieval(
+    method: str, extra: dict[str, object]
+) -> None:
+    config = {
+        "version": 1,
+        "name": "fusion",
+        "kind": "retrieve",
+        "preprocessors": [{"name": "shared", "binding": "shared"}],
+        "retrievers": BASE_CONFIG["retrievers"][:2],
+        "fusions": [
+            {
+                "name": "combined",
+                "type": method,
+                "inputs": ["dense_a", "dense_b"],
+                "top_k": 3,
+                **extra,
+            }
+        ],
+        "outputs": {"primary": "combined"},
+    }
+    pipeline = await RetrievalPipeline.build(
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"shared": CountingPreprocessor()},
+            retrievers={
+                "source_a": SourceRetriever(_ranking("a", "b")),
+                "source_b": SourceRetriever(_ranking("b", "c")),
+            },
+        ),
+    )
+
+    result = await pipeline.retrieve("query")
+
+    assert result.outputs["primary"].ranking.ids[0] == "b"
+
+
+@pytest.mark.asyncio
+async def test_rank_fusion_rejects_score_normalization() -> None:
+    config = {
+        **BASE_CONFIG,
+        "fusions": [
+            {
+                **BASE_CONFIG["fusions"][0],
+                "type": "weighted_rrf",
+                "normalization": "min_max",
+            }
+        ],
+    }
+
+    with pytest.raises(ConfigurationError, match="does not accept"):
+        await RetrievalPipeline.build(config=config)
 
 
 class InventingCandidateRetriever:
