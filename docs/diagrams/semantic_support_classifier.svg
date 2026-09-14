@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+viewBox="0 0 1240 564" width="1240" height="564"
+role="img" aria-labelledby="title desc">
+<title id="title">semantic_support_classifier</title>
+<desc id="desc">semantic_support_classifier: 1 tramos; 5 etapas y outputs; 4 dependencias.</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+markerHeight="7" orient="auto-start-reverse">
+<path d="M 0 1 L 9 5 L 0 9 z" fill="#334155"/></marker>
+<marker id="binding" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+markerHeight="7" orient="auto-start-reverse">
+<path d="M 0 1 L 9 5 L 0 9 z" fill="#537bad"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="white"/>
+<rect x="104" y="8" width="1128" height="266" rx="20" fill="#fff9df" stroke="#b5a66a" stroke-width="1.5" />
+<text x="132" y="38" font-family="Arial, sans-serif" font-size="20" fill="#243247" text-anchor="start" font-weight="600">TreeClassificationPipeline  ·  01  Clasificación semántica</text>
+<rect x="128.0" y="73" width="208.0" height="181" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="144.0" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Preprocessors</text>
+<rect x="352.0" y="73" width="208.0" height="181" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="368.0" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Node scorers</text>
+<rect x="576.0" y="73" width="208.0" height="181" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="592.0" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Path scorers</text>
+<rect x="800.0" y="73" width="208.0" height="181" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="816.0" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Deciders</text>
+<rect x="1024.0" y="73" width="208.0" height="181" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="1040.0" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Outputs</text>
+<rect x="8" y="132" width="76" height="42" rx="14" fill="#fff" stroke="#334155" stroke-width="1.5" />
+<text x="46" y="159" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="middle" font-weight="400">Query</text>
+<polyline points="84,153 96,153 96,156 144.0,156" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="320.0,150 332.0,150 332.0,146 368.0,146" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="544.0,150 556.0,150 556.0,146 592.0,146" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="768.0,150 780.0,150 780.0,146 816.0,146" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="992.0,150 1004.0,150 1004.0,162 1040.0,162" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<rect x="144.0" y="116" width="176.0" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="taxonomy_query_embedder" data-reference="false"/>
+<text x="232.0" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Embedder de query</text>
+<text x="232.0" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">taxonomy_query_</text>
+<text x="232.0" y="176" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">embedder</text>
+<text x="232.0" y="207" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">embedding</text>
+<rect x="368.0" y="116" width="176.0" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="dense_node_scorer" data-reference="false"/>
+<text x="456.0" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Similitud semántica</text>
+<text x="456.0" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">dense_node_scorer</text>
+<text x="456.0" y="207" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">dense</text>
+<rect x="592.0" y="116" width="176.0" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="mean_path_scorer" data-reference="false"/>
+<text x="680.0" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Promedio del path</text>
+<text x="680.0" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">mean_path_scorer</text>
+<text x="680.0" y="207" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">mean</text>
+<rect x="816.0" y="116" width="176.0" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="best_path_decider" data-reference="false"/>
+<text x="904.0" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Elegir el mejor path</text>
+<text x="904.0" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">best_path_decider</text>
+<text x="904.0" y="207" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">top_one</text>
+<rect x="1040.0" y="132" width="176.0" height="60" rx="22" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="primary" data-reference="false"/>
+<text x="1128.0" y="155" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">primary</text>
+<rect x="104" y="330" width="1128" height="148" rx="20" fill="#e7f0fe" stroke="#6d93c4" stroke-width="1.5" />
+<text x="132" y="456" font-family="Arial, sans-serif" font-size="17" fill="#315780" text-anchor="start" font-weight="600">ComponentBindings  ·  adapters Python</text>
+<rect x="144.0" y="349" width="176.0" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="232.0" y="373" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">taxonomy_embedding_</text>
+<text x="232.0" y="389" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">adapter</text>
+<polyline points="232.0,349 232.0,216" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<polyline points="126,529 170,529" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<text x="182" y="534" font-family="Arial, sans-serif" font-size="13" fill="#243247" text-anchor="start" font-weight="400">Flujo / dependencia del YAML</text>
+<polyline points="535,529 579,529" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<text x="591" y="534" font-family="Arial, sans-serif" font-size="13" fill="#243247" text-anchor="start" font-weight="400">Adapter → etapa</text>
+</svg>

@@ -1,0 +1,64 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+viewBox="0 0 1240 774" width="1240" height="774"
+role="img" aria-labelledby="title desc">
+<title id="title">reranked_catalog_search</title>
+<desc id="desc">reranked_catalog_search: 1 tramos; 5 etapas y outputs; 4 dependencias.</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+markerHeight="7" orient="auto-start-reverse">
+<path d="M 0 1 L 9 5 L 0 9 z" fill="#334155"/></marker>
+<marker id="binding" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+markerHeight="7" orient="auto-start-reverse">
+<path d="M 0 1 L 9 5 L 0 9 z" fill="#537bad"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="white"/>
+<rect x="104" y="8" width="1128" height="394" rx="20" fill="#fff9df" stroke="#b5a66a" stroke-width="1.5" />
+<text x="132" y="38" font-family="Arial, sans-serif" font-size="20" fill="#243247" text-anchor="start" font-weight="600">RetrievalPipeline  ·  01  Recuperar y refinar</text>
+<rect x="128.0" y="73" width="264.0" height="309" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="144.0" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Preprocessors</text>
+<rect x="408.0" y="73" width="544.0" height="309" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="424.0" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Retrievers</text>
+<rect x="968.0" y="73" width="264.0" height="309" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="984.0" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Outputs</text>
+<rect x="8" y="132" width="76" height="42" rx="14" fill="#fff" stroke="#334155" stroke-width="1.5" />
+<text x="46" y="159" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="middle" font-weight="400">Query</text>
+<polyline points="84,153 96,153 96,156 146.0,156" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="84,153 104,153 104,284 146.0,284" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="374.0,150 386.0,150 386.0,146 426.0,146" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="654.0,150 666.0,150 666.0,146 706.0,146" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="374.0,278 389.0,278 389.0,392 694.0,392 694.0,158 706.0,158" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="934.0,150 946.0,150 946.0,162 986.0,162" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<rect x="146.0" y="116" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="query_embedder" data-reference="false"/>
+<text x="260.0" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Embedder de query</text>
+<text x="260.0" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">query_embedder</text>
+<rect x="146.0" y="244" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="reranker_query_tokenizer" data-reference="false"/>
+<text x="260.0" y="267" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Tokenizer del reranker</text>
+<text x="260.0" y="288" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">reranker_query_tokenizer</text>
+<rect x="426.0" y="116" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="catalog_vector_store" data-reference="false"/>
+<text x="540.0" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Vector store remota</text>
+<text x="540.0" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">catalog_vector_store</text>
+<rect x="706.0" y="116" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="cross_encoder_reranker" data-reference="false"/>
+<text x="820.0" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Reranker cross-encoder</text>
+<text x="820.0" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">cross_encoder_reranker</text>
+<rect x="986.0" y="132" width="228" height="60" rx="22" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="primary" data-reference="false"/>
+<text x="1100.0" y="155" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">primary</text>
+<rect x="104" y="458" width="1128" height="230" rx="20" fill="#e7f0fe" stroke="#6d93c4" stroke-width="1.5" />
+<text x="132" y="666" font-family="Arial, sans-serif" font-size="17" fill="#315780" text-anchor="start" font-weight="600">ComponentBindings  ·  adapters Python</text>
+<rect x="146.0" y="477" width="228" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="260.0" y="501" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">query_embedding_adapter</text>
+<polyline points="146.0,509 125.0,509 125.0,204 146.0,204" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<rect x="146.0" y="559" width="228" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="260.0" y="583" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">reranker_tokenizer_adapter</text>
+<polyline points="146.0,591 129.0,591 129.0,332 146.0,332" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<rect x="426.0" y="477" width="228" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="540.0" y="501" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">catalog_vector_store_adapter</text>
+<polyline points="540.0,477 540.0,216" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<rect x="706.0" y="477" width="228" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="820.0" y="501" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">cross_encoder_reranker_</text>
+<text x="820.0" y="517" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">adapter</text>
+<polyline points="820.0,477 820.0,216" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<polyline points="126,739 170,739" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<text x="182" y="744" font-family="Arial, sans-serif" font-size="13" fill="#243247" text-anchor="start" font-weight="400">Flujo / dependencia del YAML</text>
+<polyline points="535,739 579,739" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<text x="591" y="744" font-family="Arial, sans-serif" font-size="13" fill="#243247" text-anchor="start" font-weight="400">Adapter → etapa</text>
+</svg>

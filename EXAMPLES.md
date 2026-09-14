@@ -1,662 +1,802 @@
 # Ejemplos progresivos
 
-Esta guía comienza donde termina el [README](README.md). Cada configuración es
-completa y ejecutable por sí sola; el siguiente nivel agrega una capacidad sin
-cambiar el contrato de los niveles anteriores.
+Esta guía continúa los pipelines mínimos del [README](README.md). Cada nivel es
+una configuración completa: conserva lo aprendido y agrega una decisión
+arquitectónica nueva.
 
 | Producto | Nivel 1 | Nivel 2 | Nivel 3 |
 |---|---|---|---|
-| Retrieval | Cascada restringida | Búsqueda híbrida | Ensamble completo |
-| Tree Classification | Más estrategias de path | Dense + BM25 | Routing completo |
+| Retrieval | Vector store + reranker | Dos búsquedas + fusión + LLM | Retrieval híbrido completo |
+| Tree Classification | Dos estrategias de path | Dense + BM25 + fusiones | Decisión y routing completos |
 
-Los nodos sólidos pertenecen al YAML. Las conexiones punteadas muestran qué
-objeto de `ComponentBindings` implementa cada etapa. Los clientes externos
-(`search_client`, `vector_store`, `embedding_model`, etc.) representan las
-integraciones de tu aplicación.
+En todos los diagramas:
+
+- el área crema es el grafo declarado en YAML;
+- el área azul contiene los adapters registrados en `ComponentBindings`;
+- las flechas sólidas transportan datos;
+- las flechas punteadas suben del adapter hacia la etapa que implementa;
+- los tramos se leen de arriba abajo y, dentro de cada tramo, de izquierda a derecha;
+- las marcas `R1`, `R2`… repiten una salida del tramo anterior, sin volver a ejecutarla.
+
+Las vistas principales son SVG con distribución fija para conservar la
+legibilidad en GitHub y en el IDE. Debajo de cada una puedes desplegar el grafo
+Mermaid completo. El YAML y los bindings Python describen el mismo pipeline.
+
+Los nombres de bindings terminan en `_adapter`. Un reranker y un selector LLM
+de Retrieval son **retrievers restringidos**: declaran `input`, reciben un
+ranking existente y solo pueden filtrar o reordenar esos chunks.
 
 # RetrievalPipeline
 
-## Nivel 1: agrega una etapa restringida
+## Nivel 1: refinar una vector store con un reranker
 
-Partimos del retrieval mínimo del README y agregamos un filtro de tenant. Como
-declara `input: catalog`, `allowed` solo puede filtrar o reordenar los chunks
-que recibió de `catalog`.
+La vector store genera candidatos con una query embebida. Después, un
+cross-encoder vuelve a puntuarlos usando su propio tokenizer.
+<!-- 
+![Diagrama de reranked_catalog_search: flujo por etapas y adapters](docs/diagrams/reranked_catalog_search.svg)
+
+<details>
+<summary>Ver grafo Mermaid completo (referencia editable)</summary> -->
 
 ```mermaid
-flowchart LR
-    query([Query])
-
-    subgraph preprocessors[Preprocessors]
-        query_text[query_text]
+flowchart TB
+    subgraph pipeline["RetrievalPipeline"]
+        direction TB
+        query([Query])
+        subgraph preprocessors[Preprocessors]
+            query_embedder["query_embedder<br/>dense embedding"]
+            reranker_query_tokenizer["reranker_query_tokenizer<br/>model tokens"]
+        end
+        subgraph retrievers[Retrievers]
+            catalog_vector_store["catalog_vector_store<br/>source retriever"]
+            cross_encoder_reranker["cross_encoder_reranker<br/>restricted retriever"]
+        end
+        subgraph outputs[Outputs]
+            primary([primary])
+        end
+        query --> query_embedder --> catalog_vector_store --> cross_encoder_reranker --> primary
+        query --> reranker_query_tokenizer --> cross_encoder_reranker
     end
 
-    subgraph retrievers[Retrievers]
-        catalog["catalog<br/>source"]
-        allowed["allowed<br/>candidate"]
+    subgraph bindings["ComponentBindings"]
+        direction LR
+        query_embedding_adapter[query_embedding_adapter]
+        reranker_tokenizer_adapter[reranker_tokenizer_adapter]
+        catalog_vector_store_adapter[catalog_vector_store_adapter]
+        cross_encoder_reranker_adapter[cross_encoder_reranker_adapter]
     end
+    query_embedding_adapter -.-> query_embedder
+    reranker_tokenizer_adapter -.-> reranker_query_tokenizer
+    catalog_vector_store_adapter -.-> catalog_vector_store
+    cross_encoder_reranker_adapter -.-> cross_encoder_reranker
 
-    subgraph outputs[Outputs]
-        primary([primary])
-    end
-
-    subgraph bindings[Bindings]
-        normalize_query[normalize_query]
-        catalog_search[catalog_search]
-        tenant_filter[tenant_filter]
-    end
-
-    query --> query_text --> catalog --> allowed --> primary
-    normalize_query -.-> query_text
-    catalog_search -.-> catalog
-    tenant_filter -.-> allowed
+    classDef node fill:#ffffff,stroke:#4b5563,color:#111827
+    classDef adapter fill:#ffffff,stroke:#4f7cac,color:#17324d
+    class query,query_embedder,reranker_query_tokenizer,catalog_vector_store,cross_encoder_reranker,primary node
+    class query_embedding_adapter,reranker_tokenizer_adapter,catalog_vector_store_adapter,cross_encoder_reranker_adapter adapter
+    style pipeline fill:#fff8df,stroke:#c9a227,stroke-width:2px
+    style bindings fill:#eaf2ff,stroke:#4f7cac,stroke-width:2px
+    style preprocessors fill:#f8fafc,stroke:#cbd5e1
+    style retrievers fill:#f8fafc,stroke:#cbd5e1
+    style outputs fill:#f8fafc,stroke:#cbd5e1
 ```
 
-`retrieval-cascade.yaml`:
+</details>
+
+`retrieval-reranked.yaml`:
 
 ```yaml
 version: 1
-name: catalog_cascade
+name: reranked_catalog_search
 kind: retrieve
 
 preprocessors:
-  - name: query_text
-    binding: normalize_query
+  - name: query_embedder
+    binding: query_embedding_adapter
+  - name: reranker_query_tokenizer
+    binding: reranker_tokenizer_adapter
 
 retrievers:
-  - name: catalog
-    binding: catalog_search
-    preprocessor: query_text
+  - name: catalog_vector_store
+    binding: catalog_vector_store_adapter
+    preprocessor: query_embedder
     top_k: 100
-  - name: allowed
-    binding: tenant_filter
-    preprocessor: query_text
-    input: catalog
-    top_k: 20
+  - name: cross_encoder_reranker
+    binding: cross_encoder_reranker_adapter
+    preprocessor: reranker_query_tokenizer
+    input: catalog_vector_store
+    top_k: 10
 
 outputs:
-  primary: allowed
+  primary: cross_encoder_reranker
 ```
 
-Bindings — reutiliza `NormalizeQuery` y `CatalogSearch` del README y suma el
-filtro:
+Bindings — reutiliza los adapters de embedding y vector store del README:
+
+```python
+from chunkbuster import ComponentBindings, RankedItem, Ranking
+
+
+class RerankerTokenizerAdapter:
+    def __init__(self, tokenizer):
+        self.tokenizer = tokenizer
+
+    def prepare_query(self, text):
+        return self.tokenizer.encode(text)
+
+
+class CrossEncoderRerankerAdapter:
+    def __init__(self, model):
+        self.model = model
+
+    async def retrieve_candidates(self, query_tokens, candidates, *, top_k):
+        scores = await self.model.score(
+            query_tokens,
+            [item.item.text for item in candidates],
+        )
+        rescored = (
+            RankedItem(item.id, item.item, score)
+            for item, score in zip(candidates, scores, strict=True)
+        )
+        return Ranking(tuple(sorted(rescored, key=lambda item: -item.score))[:top_k])
+
+
+bindings = ComponentBindings(
+    preprocessors={
+        "query_embedding_adapter": QueryEmbeddingAdapter(embedding_model),
+        "reranker_tokenizer_adapter": RerankerTokenizerAdapter(reranker_tokenizer),
+    },
+    retrievers={
+        "catalog_vector_store_adapter": CatalogVectorStoreAdapter(vector_store),
+        "cross_encoder_reranker_adapter": CrossEncoderRerankerAdapter(reranker_model),
+    },
+)
+```
+
+## Nivel 2: fusionar búsquedas y terminar con un LLM
+
+Una vector store remota y una búsqueda vectorial local producen rankings
+independientes. `vector_rank_fusion` los combina por posición, el reranker los
+refina y el LLM elige el chunk final dentro de esa lista.
+<!-- 
+![Diagrama de vector_ensemble_with_llm: flujo por etapas y adapters](docs/diagrams/vector_ensemble_with_llm.svg)
+
+<details>
+<summary>Ver grafo Mermaid completo (referencia editable)</summary> -->
+
+```mermaid
+flowchart TB
+    subgraph pipeline["RetrievalPipeline"]
+        direction TB
+        query([Query])
+        subgraph preprocessors[Preprocessors]
+            query_embedder["query_embedder<br/>dense embedding"]
+            refinement_query_tokenizer["refinement_query_tokenizer<br/>model tokens"]
+        end
+        subgraph retrievers[Retrievers]
+            catalog_vector_store["catalog_vector_store<br/>remote vector store"]
+            local_vector_search["local_vector_search<br/>in-memory vectors"]
+            cross_encoder_reranker["cross_encoder_reranker<br/>restricted"]
+            llm_chunk_selector["llm_chunk_selector<br/>restricted"]
+        end
+        subgraph fusions[Fusions]
+            vector_rank_fusion["vector_rank_fusion<br/>weighted_rrf"]
+        end
+        subgraph outputs[Outputs]
+            primary([primary])
+            reranked([reranked])
+        end
+        query --> query_embedder
+        query_embedder --> catalog_vector_store --> vector_rank_fusion
+        query_embedder --> local_vector_search --> vector_rank_fusion
+        query --> refinement_query_tokenizer
+        refinement_query_tokenizer --> cross_encoder_reranker
+        refinement_query_tokenizer --> llm_chunk_selector
+        vector_rank_fusion --> cross_encoder_reranker --> llm_chunk_selector --> primary
+        cross_encoder_reranker --> reranked
+    end
+
+    subgraph bindings["ComponentBindings"]
+        direction LR
+        query_embedding_adapter[query_embedding_adapter]
+        refinement_tokenizer_adapter[refinement_tokenizer_adapter]
+        catalog_vector_store_adapter[catalog_vector_store_adapter]
+        local_vector_search_adapter[local_vector_search_adapter]
+        cross_encoder_reranker_adapter[cross_encoder_reranker_adapter]
+        llm_chunk_selector_adapter[llm_chunk_selector_adapter]
+    end
+    query_embedding_adapter -.-> query_embedder
+    refinement_tokenizer_adapter -.-> refinement_query_tokenizer
+    catalog_vector_store_adapter -.-> catalog_vector_store
+    local_vector_search_adapter -.-> local_vector_search
+    cross_encoder_reranker_adapter -.-> cross_encoder_reranker
+    llm_chunk_selector_adapter -.-> llm_chunk_selector
+
+    classDef node fill:#ffffff,stroke:#4b5563,color:#111827
+    classDef adapter fill:#ffffff,stroke:#4f7cac,color:#17324d
+    class query,query_embedder,refinement_query_tokenizer,catalog_vector_store,local_vector_search,cross_encoder_reranker,llm_chunk_selector,vector_rank_fusion,primary,reranked node
+    class query_embedding_adapter,refinement_tokenizer_adapter,catalog_vector_store_adapter,local_vector_search_adapter,cross_encoder_reranker_adapter,llm_chunk_selector_adapter adapter
+    style pipeline fill:#fff8df,stroke:#c9a227,stroke-width:2px
+    style bindings fill:#eaf2ff,stroke:#4f7cac,stroke-width:2px
+    style preprocessors fill:#f8fafc,stroke:#cbd5e1
+    style retrievers fill:#f8fafc,stroke:#cbd5e1
+    style fusions fill:#f8fafc,stroke:#cbd5e1
+    style outputs fill:#f8fafc,stroke:#cbd5e1
+```
+
+</details>
+
+`retrieval-vector-ensemble.yaml`:
+
+```yaml
+version: 1
+name: vector_ensemble_with_llm
+kind: retrieve
+
+preprocessors:
+  - name: query_embedder
+    binding: query_embedding_adapter
+  - name: refinement_query_tokenizer
+    binding: refinement_tokenizer_adapter
+
+retrievers:
+  - name: catalog_vector_store
+    binding: catalog_vector_store_adapter
+    preprocessor: query_embedder
+    top_k: 100
+  - name: local_vector_search
+    binding: local_vector_search_adapter
+    preprocessor: query_embedder
+    top_k: 100
+  - name: cross_encoder_reranker
+    binding: cross_encoder_reranker_adapter
+    preprocessor: refinement_query_tokenizer
+    input: vector_rank_fusion
+    top_k: 20
+  - name: llm_chunk_selector
+    binding: llm_chunk_selector_adapter
+    preprocessor: refinement_query_tokenizer
+    input: cross_encoder_reranker
+    top_k: 1
+
+fusions:
+  - name: vector_rank_fusion
+    type: weighted_rrf
+    inputs: [catalog_vector_store, local_vector_search]
+    weights: [0.6, 0.4]
+    k: 60
+    top_k: 50
+
+outputs:
+  primary: llm_chunk_selector
+  reranked: cross_encoder_reranker
+```
+
+Bindings — el LLM devuelve IDs de los candidatos; el adapter conserva los
+objetos `Chunk` canónicos:
 
 ```python
 from chunkbuster import ComponentBindings, Ranking
 
 
-class TenantFilter:
-    def __init__(self, tenant):
-        self.tenant = tenant
-
-    def retrieve_candidates(self, query, candidates, *, top_k):
-        allowed = (
-            item
-            for item in candidates
-            if item.item.metadata.get("tenant") == self.tenant
-        )
-        return Ranking(tuple(allowed)[:top_k])
-
-
-bindings = ComponentBindings(
-    preprocessors={"normalize_query": NormalizeQuery()},
-    retrievers={
-        "catalog_search": CatalogSearch(search_client),
-        "tenant_filter": TenantFilter(tenant="acme"),
-    },
-)
-```
-
-## Nivel 2: agrega una segunda señal y fusión por rank
-
-Ahora la query se representa de dos formas. La rama dense consulta un
-vectorstore; la rama lexical consulta un índice BM25. Ambas se filtran y
-`weighted_rrf` combina sus posiciones sin comparar escalas de score.
-
-```mermaid
-flowchart LR
-    query([Query])
-
-    subgraph preprocessors[Preprocessors]
-        semantic_query[semantic_query]
-        lexical_query[lexical_query]
-    end
-
-    subgraph retrievers[Retrievers]
-        dense_hits["dense_hits<br/>source"]
-        keyword_hits["keyword_hits<br/>source"]
-        dense_allowed["dense_allowed<br/>candidate"]
-        keyword_allowed["keyword_allowed<br/>candidate"]
-    end
-
-    subgraph fusions[Fusions]
-        rank_hybrid["rank_hybrid<br/>weighted_rrf"]
-    end
-
-    subgraph outputs[Outputs]
-        primary([primary])
-    end
-
-    subgraph bindings[Bindings]
-        embeddings[embeddings]
-        tokenizer[tokenizer]
-        vector_search[vector_search]
-        bm25_search[bm25_search]
-        tenant_filter[tenant_filter]
-    end
-
-    query --> semantic_query --> dense_hits --> dense_allowed --> rank_hybrid
-    query --> lexical_query --> keyword_hits --> keyword_allowed --> rank_hybrid
-    rank_hybrid --> primary
-    embeddings -.-> semantic_query
-    tokenizer -.-> lexical_query
-    vector_search -.-> dense_hits
-    bm25_search -.-> keyword_hits
-    tenant_filter -.-> dense_allowed
-    tenant_filter -.-> keyword_allowed
-```
-
-`retrieval-hybrid.yaml`:
-
-```yaml
-version: 1
-name: hybrid_catalog
-kind: retrieve
-
-preprocessors:
-  - name: semantic_query
-    binding: embeddings
-  - name: lexical_query
-    binding: tokenizer
-
-retrievers:
-  - name: dense_hits
-    binding: vector_search
-    preprocessor: semantic_query
-    top_k: 100
-  - name: keyword_hits
-    binding: bm25_search
-    preprocessor: lexical_query
-    top_k: 100
-  - name: dense_allowed
-    binding: tenant_filter
-    preprocessor: semantic_query
-    input: dense_hits
-    top_k: 50
-  - name: keyword_allowed
-    binding: tenant_filter
-    preprocessor: lexical_query
-    input: keyword_hits
-    top_k: 50
-
-fusions:
-  - name: rank_hybrid
-    type: weighted_rrf
-    inputs: [dense_allowed, keyword_allowed]
-    weights: [0.7, 0.3]
-    k: 60
-    top_k: 20
-
-outputs:
-  primary: rank_hybrid
-```
-
-Bindings — conserva `TenantFilter` y agrega los adapters dense y lexical:
-
-```python
-from chunkbuster import ComponentBindings, RankedItem, Ranking, TextTokenizer
-from chunkbuster.retrieval import Chunk
-
-
-def as_ranking(hits):
-    return Ranking(
-        tuple(
-            RankedItem(
-                hit.id,
-                Chunk(hit.id, hit.text, hit.metadata),
-                hit.score,
-            )
-            for hit in hits
-        )
-    )
-
-
-class EmbeddingQuery:
-    def __init__(self, model):
-        self.model = model
-
-    async def prepare_query(self, text):
-        return await self.model.embed(text)
-
-
-class VectorSearch:
-    def __init__(self, store):
-        self.store = store
-
-    async def retrieve(self, vector, *, top_k):
-        return as_ranking(await self.store.search(vector, limit=top_k))
-
-
-class BM25Search:
+class LocalVectorSearchAdapter:
     def __init__(self, index):
         self.index = index
 
-    async def retrieve(self, tokens, *, top_k):
-        return as_ranking(await self.index.search(tokens, limit=top_k))
+    def retrieve(self, vector, *, top_k):
+        return self.index.search(vector, top_k=top_k)
+
+
+class LLMChunkSelectorAdapter:
+    def __init__(self, llm):
+        self.llm = llm
+
+    async def retrieve_candidates(self, query_tokens, candidates, *, top_k):
+        chosen_ids = await self.llm.choose_chunks(
+            query_tokens=query_tokens,
+            candidates=[item.item for item in candidates],
+            limit=top_k,
+        )
+        by_id = {item.id: item for item in candidates}
+        return Ranking(tuple(by_id[item_id] for item_id in chosen_ids))
 
 
 bindings = ComponentBindings(
     preprocessors={
-        "embeddings": EmbeddingQuery(embedding_model),
-        "tokenizer": TextTokenizer(strip_accents=True),
+        "query_embedding_adapter": QueryEmbeddingAdapter(embedding_model),
+        "refinement_tokenizer_adapter": RerankerTokenizerAdapter(tokenizer),
     },
     retrievers={
-        "vector_search": VectorSearch(vector_store),
-        "bm25_search": BM25Search(bm25_index),
-        "tenant_filter": TenantFilter(tenant="acme"),
+        "catalog_vector_store_adapter": CatalogVectorStoreAdapter(vector_store),
+        "local_vector_search_adapter": LocalVectorSearchAdapter(local_index),
+        "cross_encoder_reranker_adapter": CrossEncoderRerankerAdapter(reranker_model),
+        "llm_chunk_selector_adapter": LLMChunkSelectorAdapter(llm),
     },
 )
 ```
 
-## Nivel 3: ensamble completo y múltiples outputs
+El pipeline rechazará cualquier ID que el LLM invente o que ya no pertenezca
+al ranking recibido.
 
-El último nivel conserva las dos ramas anteriores y calcula tres resultados:
-uno basado en ranks, otro en scores normalizados y un consenso que premia la
-coincidencia entre ambos. Las fusiones pueden consumir otras fusiones.
+## Nivel 3: retrieval híbrido completo
+
+Se agrega BM25 como tercera fuente. Una fusión por rank tolera escalas
+incomparables; otra fusión por score normaliza cada ranking. El consenso,
+reranker y selector LLM aportan tres formas sucesivas de ganar precisión.
+<!-- 
+![Diagrama de precise_hybrid_search: flujo por etapas y adapters](docs/diagrams/precise_hybrid_search.svg)
+
+<details>
+<summary>Ver grafo Mermaid completo (referencia editable)</summary> -->
 
 ```mermaid
-flowchart LR
-    query([Query])
-
-    subgraph preprocessors[Preprocessors]
-        semantic_query[semantic_query]
-        lexical_query[lexical_query]
+flowchart TB
+    subgraph pipeline["RetrievalPipeline"]
+        direction TB
+        query([Query])
+        subgraph preprocessors[Preprocessors]
+            query_embedder["query_embedder<br/>dense embedding"]
+            sparse_query_tokenizer["sparse_query_tokenizer<br/>BM25 tokens"]
+        end
+        subgraph retrievers[Retrievers]
+            catalog_vector_store["catalog_vector_store<br/>remote vectors"]
+            local_vector_search["local_vector_search<br/>local vectors"]
+            bm25_lexical_search["bm25_lexical_search<br/>sparse index"]
+            cross_encoder_reranker["cross_encoder_reranker<br/>restricted"]
+            llm_chunk_selector["llm_chunk_selector<br/>restricted"]
+        end
+        subgraph fusions[Fusions]
+            hybrid_rank_fusion["hybrid_rank_fusion<br/>weighted_rrf"]
+            calibrated_score_fusion["calibrated_score_fusion<br/>weighted_sum + min_max"]
+            consensus_fusion["consensus_fusion<br/>comb_mnz + z_score"]
+        end
+        subgraph outputs[Outputs]
+            primary([primary])
+            reranked([reranked])
+            consensus([consensus])
+        end
+        query --> query_embedder
+        query_embedder --> catalog_vector_store
+        query_embedder --> local_vector_search
+        query --> sparse_query_tokenizer --> bm25_lexical_search
+        catalog_vector_store --> hybrid_rank_fusion
+        local_vector_search --> hybrid_rank_fusion
+        bm25_lexical_search --> hybrid_rank_fusion
+        catalog_vector_store --> calibrated_score_fusion
+        local_vector_search --> calibrated_score_fusion
+        bm25_lexical_search --> calibrated_score_fusion
+        sparse_query_tokenizer --> cross_encoder_reranker
+        sparse_query_tokenizer --> llm_chunk_selector
+        hybrid_rank_fusion --> cross_encoder_reranker
+        hybrid_rank_fusion --> consensus_fusion
+        calibrated_score_fusion --> consensus_fusion
+        cross_encoder_reranker --> consensus_fusion
+        cross_encoder_reranker --> reranked
+        consensus_fusion --> llm_chunk_selector --> primary
+        consensus_fusion --> consensus
     end
 
-    subgraph retrievers[Retrievers]
-        dense_hits["dense_hits<br/>source"]
-        keyword_hits["keyword_hits<br/>source"]
-        dense_allowed["dense_allowed<br/>candidate"]
-        keyword_allowed["keyword_allowed<br/>candidate"]
+    subgraph bindings["ComponentBindings"]
+        direction LR
+        query_embedding_adapter[query_embedding_adapter]
+        sparse_tokenizer_adapter[sparse_tokenizer_adapter]
+        catalog_vector_store_adapter[catalog_vector_store_adapter]
+        local_vector_search_adapter[local_vector_search_adapter]
+        bm25_search_adapter[bm25_search_adapter]
+        cross_encoder_reranker_adapter[cross_encoder_reranker_adapter]
+        llm_chunk_selector_adapter[llm_chunk_selector_adapter]
     end
+    query_embedding_adapter -.-> query_embedder
+    sparse_tokenizer_adapter -.-> sparse_query_tokenizer
+    catalog_vector_store_adapter -.-> catalog_vector_store
+    local_vector_search_adapter -.-> local_vector_search
+    bm25_lexical_search -.-> bm25_search_adapter
+    cross_encoder_reranker_adapter -.-> cross_encoder_reranker
+    llm_chunk_selector_adapter -.-> llm_chunk_selector
 
-    subgraph fusions[Fusions]
-        rank_hybrid["rank_hybrid<br/>weighted_rrf"]
-        score_hybrid["score_hybrid<br/>weighted_sum"]
-        consensus["consensus<br/>comb_mnz"]
-    end
-
-    subgraph outputs[Outputs]
-        primary([primary])
-        rank_debug([rank_debug])
-        score_debug([score_debug])
-    end
-
-    subgraph bindings[Bindings]
-        embeddings[embeddings]
-        tokenizer[tokenizer]
-        vector_search[vector_search]
-        bm25_search[bm25_search]
-        tenant_filter[tenant_filter]
-    end
-
-    query --> semantic_query --> dense_hits --> dense_allowed
-    query --> lexical_query --> keyword_hits --> keyword_allowed
-    dense_allowed --> rank_hybrid
-    keyword_allowed --> rank_hybrid
-    dense_allowed --> score_hybrid
-    keyword_allowed --> score_hybrid
-    rank_hybrid --> consensus
-    score_hybrid --> consensus
-    consensus --> primary
-    rank_hybrid --> rank_debug
-    score_hybrid --> score_debug
-    embeddings -.-> semantic_query
-    tokenizer -.-> lexical_query
-    vector_search -.-> dense_hits
-    bm25_search -.-> keyword_hits
-    tenant_filter -.-> dense_allowed
-    tenant_filter -.-> keyword_allowed
+    classDef node fill:#ffffff,stroke:#4b5563,color:#111827
+    classDef adapter fill:#ffffff,stroke:#4f7cac,color:#17324d
+    class query,query_embedder,sparse_query_tokenizer,catalog_vector_store,local_vector_search,bm25_lexical_search,cross_encoder_reranker,llm_chunk_selector,hybrid_rank_fusion,calibrated_score_fusion,consensus_fusion,primary,reranked,consensus node
+    class query_embedding_adapter,sparse_tokenizer_adapter,catalog_vector_store_adapter,local_vector_search_adapter,bm25_search_adapter,cross_encoder_reranker_adapter,llm_chunk_selector_adapter adapter
+    style pipeline fill:#fff8df,stroke:#c9a227,stroke-width:2px
+    style bindings fill:#eaf2ff,stroke:#4f7cac,stroke-width:2px
+    style preprocessors fill:#f8fafc,stroke:#cbd5e1
+    style retrievers fill:#f8fafc,stroke:#cbd5e1
+    style fusions fill:#f8fafc,stroke:#cbd5e1
+    style outputs fill:#f8fafc,stroke:#cbd5e1
 ```
 
-`retrieval-ensemble.yaml`:
+</details>
+
+`retrieval-complete.yaml`:
 
 ```yaml
 version: 1
-name: catalog_ensemble
+name: precise_hybrid_search
 kind: retrieve
 
 preprocessors:
-  - name: semantic_query
-    binding: embeddings
-  - name: lexical_query
-    binding: tokenizer
+  - name: query_embedder
+    binding: query_embedding_adapter
+  - name: sparse_query_tokenizer
+    binding: sparse_tokenizer_adapter
 
 retrievers:
-  - name: dense_hits
-    binding: vector_search
-    preprocessor: semantic_query
+  - name: catalog_vector_store
+    binding: catalog_vector_store_adapter
+    preprocessor: query_embedder
     top_k: 100
-  - name: keyword_hits
-    binding: bm25_search
-    preprocessor: lexical_query
+  - name: local_vector_search
+    binding: local_vector_search_adapter
+    preprocessor: query_embedder
     top_k: 100
-  - name: dense_allowed
-    binding: tenant_filter
-    preprocessor: semantic_query
-    input: dense_hits
-    top_k: 50
-  - name: keyword_allowed
-    binding: tenant_filter
-    preprocessor: lexical_query
-    input: keyword_hits
-    top_k: 50
+  - name: bm25_lexical_search
+    binding: bm25_search_adapter
+    preprocessor: sparse_query_tokenizer
+    top_k: 100
+  - name: cross_encoder_reranker
+    binding: cross_encoder_reranker_adapter
+    preprocessor: sparse_query_tokenizer
+    input: hybrid_rank_fusion
+    top_k: 30
+  - name: llm_chunk_selector
+    binding: llm_chunk_selector_adapter
+    preprocessor: sparse_query_tokenizer
+    input: consensus_fusion
+    top_k: 1
 
 fusions:
-  - name: rank_hybrid
+  - name: hybrid_rank_fusion
     type: weighted_rrf
-    inputs: [dense_allowed, keyword_allowed]
-    weights: [0.7, 0.3]
+    inputs: [catalog_vector_store, local_vector_search, bm25_lexical_search]
+    weights: [0.5, 0.2, 0.3]
     k: 60
-    top_k: 30
-  - name: score_hybrid
+    top_k: 50
+  - name: calibrated_score_fusion
     type: weighted_sum
-    inputs: [dense_allowed, keyword_allowed]
-    weights: [0.7, 0.3]
+    inputs: [catalog_vector_store, local_vector_search, bm25_lexical_search]
+    weights: [0.5, 0.2, 0.3]
     normalization: min_max
-    top_k: 30
-  - name: consensus
+    top_k: 50
+  - name: consensus_fusion
     type: comb_mnz
-    inputs: [rank_hybrid, score_hybrid]
-    weights: [1.0, 1.0]
-    normalization: min_max
-    top_k: 20
+    inputs: [hybrid_rank_fusion, calibrated_score_fusion, cross_encoder_reranker]
+    normalization: z_score
+    top_k: 10
 
 outputs:
-  primary: consensus
-  rank_debug: rank_hybrid
-  score_debug: score_hybrid
+  primary: llm_chunk_selector
+  reranked: cross_encoder_reranker
+  consensus: consensus_fusion
 ```
 
-Bindings — son los mismos adapters del nivel 2; solo cambia el grafo:
+Bindings:
 
 ```python
+from chunkbuster import ComponentBindings, TextTokenizer
+
+
+class BM25SearchAdapter:
+    def __init__(self, index):
+        self.index = index
+
+    def retrieve(self, tokens, *, top_k):
+        return self.index.search(tokens, top_k=top_k)
+
+
 bindings = ComponentBindings(
     preprocessors={
-        "embeddings": EmbeddingQuery(embedding_model),
-        "tokenizer": TextTokenizer(strip_accents=True),
+        "query_embedding_adapter": QueryEmbeddingAdapter(embedding_model),
+        "sparse_tokenizer_adapter": TextTokenizer(
+            mode="word",
+            case_sensitive=False,
+            strip_accents=True,
+            min_length=2,
+            stop_words={"de", "la", "el"},
+        ),
     },
     retrievers={
-        "vector_search": VectorSearch(vector_store),
-        "bm25_search": BM25Search(bm25_index),
-        "tenant_filter": TenantFilter(tenant="acme"),
+        "catalog_vector_store_adapter": CatalogVectorStoreAdapter(vector_store),
+        "local_vector_search_adapter": LocalVectorSearchAdapter(local_index),
+        "bm25_search_adapter": BM25SearchAdapter(bm25_index),
+        "cross_encoder_reranker_adapter": CrossEncoderRerankerAdapter(reranker_model),
+        "llm_chunk_selector_adapter": LLMChunkSelectorAdapter(llm),
     },
 )
-
-pipeline = await RetrievalPipeline.build(
-    config="retrieval-ensemble.yaml",
-    bindings=bindings,
-)
-result = await pipeline.retrieve(
-    "facturas de septiembre",
-    outputs=("primary",),
-)
 ```
+
+`BM25SearchAdapter` es un retriever fuente: implementa
+`retrieve(tokens, *, top_k)`. Las fusiones son internas y no necesitan binding.
 
 # TreeClassificationPipeline
 
-Los tres niveles usan la taxonomía `support` del README. El preprocessor
-semántico también es el mismo: genera embeddings de nodos durante `build()` si
-la taxonomía todavía no los contiene.
+Los siguientes niveles reutilizan la taxonomía y `TaxonomyEmbeddingAdapter` del
+README. A diferencia de Retrieval, dense y BM25 producen `NodeScores`; después
+los path scorers construyen rankings de paths y los deciders publican una
+selección.
 
-## Nivel 1: agrega estrategias de path y outputs
+## Nivel 1: comparar dos estrategias de path
 
-Partimos del scorer dense y calculamos dos rankings de paths. Uno usa la media;
-el otro da más peso a la hoja. Cada ranking alimenta un decider y se publica
-como output independiente.
+Un único scorer semántico alimenta dos lecturas del árbol: promedio de todos
+los nodos y una suma que da más peso a la hoja.
+
+<!-- ![Diagrama de semantic_path_strategies: flujo por etapas y adapters](docs/diagrams/semantic_path_strategies.svg)
+
+<details>
+<summary>Ver grafo Mermaid completo (referencia editable)</summary> -->
 
 ```mermaid
-flowchart LR
-    query([Query])
-
-    subgraph preprocessors[Preprocessors]
-        semantic[semantic]
+flowchart TB
+    subgraph pipeline["TreeClassificationPipeline"]
+        direction TB
+        query([Query])
+        subgraph preprocessors[Preprocessors]
+            taxonomy_query_embedder["taxonomy_query_embedder<br/>dense embedding"]
+        end
+        subgraph node_scorers[Node scorers]
+            dense_node_scorer["dense_node_scorer<br/>cosine"]
+        end
+        subgraph path_scorers[Path scorers]
+            mean_path_scorer["mean_path_scorer<br/>mean"]
+            leaf_weighted_path_scorer["leaf_weighted_path_scorer<br/>weighted_sum"]
+        end
+        subgraph deciders[Deciders]
+            best_mean_path_decider["best_mean_path_decider<br/>top_one"]
+            confident_leaf_path_decider["confident_leaf_path_decider<br/>threshold"]
+        end
+        subgraph outputs[Outputs]
+            primary([primary])
+            confident([confident])
+        end
+        query --> taxonomy_query_embedder --> dense_node_scorer
+        dense_node_scorer --> mean_path_scorer --> best_mean_path_decider --> primary
+        dense_node_scorer --> leaf_weighted_path_scorer --> confident_leaf_path_decider --> confident
     end
 
-    subgraph node_scorers[Node scorers]
-        dense_nodes[dense_nodes]
+    subgraph bindings["ComponentBindings"]
+        taxonomy_embedding_adapter[taxonomy_embedding_adapter]
     end
+    taxonomy_embedding_adapter -.-> taxonomy_query_embedder
 
-    subgraph path_scorers[Path scorers]
-        mean_paths["mean_paths<br/>mean"]
-        leaf_weighted["leaf_weighted<br/>weighted_sum"]
-    end
-
-    subgraph deciders[Deciders]
-        best_path["best_path<br/>top_one"]
-        confident["confident<br/>threshold"]
-    end
-
-    subgraph outputs[Outputs]
-        primary([primary])
-        confident_output([confident])
-    end
-
-    subgraph bindings[Bindings]
-        embeddings[embeddings]
-    end
-
-    query --> semantic --> dense_nodes
-    dense_nodes --> mean_paths --> best_path --> primary
-    dense_nodes --> leaf_weighted --> confident --> confident_output
-    embeddings -.-> semantic
+    classDef node fill:#ffffff,stroke:#4b5563,color:#111827
+    classDef adapter fill:#ffffff,stroke:#4f7cac,color:#17324d
+    class query,taxonomy_query_embedder,dense_node_scorer,mean_path_scorer,leaf_weighted_path_scorer,best_mean_path_decider,confident_leaf_path_decider,primary,confident node
+    class taxonomy_embedding_adapter adapter
+    style pipeline fill:#fff8df,stroke:#c9a227,stroke-width:2px
+    style bindings fill:#eaf2ff,stroke:#4f7cac,stroke-width:2px
+    style preprocessors fill:#f8fafc,stroke:#cbd5e1
+    style node_scorers fill:#f8fafc,stroke:#cbd5e1
+    style path_scorers fill:#f8fafc,stroke:#cbd5e1
+    style deciders fill:#f8fafc,stroke:#cbd5e1
+    style outputs fill:#f8fafc,stroke:#cbd5e1
 ```
+
+</details>
 
 `tree-path-strategies.yaml`:
 
 ```yaml
 version: 1
-name: support_path_strategies
+name: semantic_path_strategies
 kind: tree_classification
 
 preprocessors:
-  - name: semantic
+  - name: taxonomy_query_embedder
     type: embedding
-    binding: embeddings
+    binding: taxonomy_embedding_adapter
     dimensions: 3
 
 node_scorers:
-  - name: dense_nodes
+  - name: dense_node_scorer
     type: dense
-    preprocessor: semantic
+    preprocessor: taxonomy_query_embedder
     similarity: cosine
 
 path_scorers:
-  - name: mean_paths
+  - name: mean_path_scorer
     type: mean
-    input: dense_nodes
+    input: dense_node_scorer
     top_k: 10
-  - name: leaf_weighted
+  - name: leaf_weighted_path_scorer
     type: weighted_sum
-    input: dense_nodes
+    input: dense_node_scorer
     terms:
-      root: 0.10
-      mean: 0.30
-      leaf: 0.60
+      mean: 0.4
+      leaf: 0.6
     top_k: 10
 
 deciders:
-  - name: best_path
+  - name: best_mean_path_decider
     type: top_one
-    input: mean_paths
-  - name: confident
+    input: mean_path_scorer
+  - name: confident_leaf_path_decider
     type: threshold
-    input: leaf_weighted
-    min_score: 0.65
+    input: leaf_weighted_path_scorer
+    min_score: 0.55
     count: 3
 
 outputs:
-  primary: best_path
-  confident: confident
+  primary: best_mean_path_decider
+  confident: confident_leaf_path_decider
 ```
 
-Bindings — no aparece ninguna integración nueva respecto del README:
+Bindings:
 
 ```python
-bindings = ComponentBindings(
-    preprocessors={"embeddings": Embeddings(embedding_model)},
-)
+from chunkbuster import ComponentBindings
 
-pipeline = await TreeClassificationPipeline.build(
-    taxonomy=taxonomy,
-    config="tree-path-strategies.yaml",
-    bindings=bindings,
+bindings = ComponentBindings(
+    preprocessors={
+        "taxonomy_embedding_adapter": TaxonomyEmbeddingAdapter(embedding_model),
+    },
 )
 ```
 
-## Nivel 2: agrega BM25 y fusiones híbridas
+## Nivel 2: dense + BM25 antes y después del path scoring
 
-La rama lexical suma BM25. `hybrid_score` fusiona scores de nodos para un path
-ponderado; `rank_ensemble` combina los rankings dense y lexical sin exigir que
-sus escalas sean comparables.
+El embedder y el tokenizer generan dos señales por nodo. Una node fusion crea
+un score híbrido antes de construir paths; una path fusion reúne tres rankings
+ya construidos. Son decisiones distintas y pueden convivir.
+<!-- 
+![Diagrama de hybrid_support_classifier: flujo por etapas y adapters](docs/diagrams/hybrid_support_classifier.svg)
+
+<details>
+<summary>Ver grafo Mermaid completo (referencia editable)</summary> -->
 
 ```mermaid
-flowchart LR
-    query([Query])
-
-    subgraph preprocessors[Preprocessors]
-        semantic[semantic]
-        lexical[lexical]
+flowchart TB
+    subgraph pipeline["TreeClassificationPipeline"]
+        direction TB
+        query([Query])
+        subgraph preprocessors[Preprocessors]
+            taxonomy_query_embedder["taxonomy_query_embedder<br/>dense embedding"]
+            taxonomy_query_tokenizer["taxonomy_query_tokenizer<br/>BM25 tokens"]
+        end
+        subgraph node_scorers[Node scorers]
+            dense_node_scorer["dense_node_scorer<br/>cosine"]
+            bm25_node_scorer["bm25_node_scorer<br/>BM25"]
+        end
+        subgraph node_fusions[Node fusions]
+            hybrid_node_score_fusion["hybrid_node_score_fusion<br/>weighted_sum + min_max"]
+        end
+        subgraph path_scorers[Path scorers]
+            dense_mean_path_scorer["dense_mean_path_scorer<br/>mean"]
+            bm25_mean_path_scorer["bm25_mean_path_scorer<br/>mean"]
+            hybrid_weighted_path_scorer["hybrid_weighted_path_scorer<br/>weighted_sum"]
+        end
+        subgraph path_fusions[Path fusions]
+            hybrid_path_rank_fusion["hybrid_path_rank_fusion<br/>weighted_rrf"]
+        end
+        subgraph deciders[Deciders]
+            best_hybrid_path_decider["best_hybrid_path_decider<br/>top_one"]
+            top_hybrid_paths_decider["top_hybrid_paths_decider<br/>top_k"]
+        end
+        subgraph outputs[Outputs]
+            primary([primary])
+            alternatives([alternatives])
+        end
+        query --> taxonomy_query_embedder --> dense_node_scorer
+        query --> taxonomy_query_tokenizer --> bm25_node_scorer
+        dense_node_scorer --> hybrid_node_score_fusion
+        bm25_node_scorer --> hybrid_node_score_fusion
+        dense_node_scorer --> dense_mean_path_scorer --> hybrid_path_rank_fusion
+        bm25_node_scorer --> bm25_mean_path_scorer --> hybrid_path_rank_fusion
+        hybrid_node_score_fusion --> hybrid_weighted_path_scorer --> hybrid_path_rank_fusion
+        hybrid_path_rank_fusion --> best_hybrid_path_decider --> primary
+        hybrid_path_rank_fusion --> top_hybrid_paths_decider --> alternatives
     end
 
-    subgraph node_scorers[Node scorers]
-        dense_nodes[dense_nodes]
-        bm25_nodes[bm25_nodes]
+    subgraph bindings["ComponentBindings"]
+        direction LR
+        taxonomy_embedding_adapter[taxonomy_embedding_adapter]
+        sparse_tokenizer_adapter[sparse_tokenizer_adapter]
     end
+    taxonomy_embedding_adapter -.-> taxonomy_query_embedder
+    sparse_tokenizer_adapter -.-> taxonomy_query_tokenizer
 
-    subgraph node_fusions[Node fusions]
-        hybrid_score["hybrid_score<br/>weighted_sum"]
-    end
-
-    subgraph path_scorers[Path scorers]
-        dense_mean[dense_mean]
-        lexical_mean[lexical_mean]
-        hybrid_weighted[hybrid_weighted]
-    end
-
-    subgraph path_fusions[Path fusions]
-        rank_ensemble["rank_ensemble<br/>weighted_rrf"]
-    end
-
-    subgraph deciders[Deciders]
-        hybrid_best["hybrid_best<br/>top_one"]
-        shortlist["shortlist<br/>top_k"]
-    end
-
-    subgraph outputs[Outputs]
-        primary([primary])
-        alternatives([alternatives])
-    end
-
-    subgraph bindings[Bindings]
-        embeddings[embeddings]
-        tokenizer[tokenizer]
-    end
-
-    query --> semantic --> dense_nodes
-    query --> lexical --> bm25_nodes
-    dense_nodes --> hybrid_score
-    bm25_nodes --> hybrid_score
-    dense_nodes --> dense_mean --> rank_ensemble
-    bm25_nodes --> lexical_mean --> rank_ensemble
-    hybrid_score --> hybrid_weighted --> hybrid_best --> primary
-    rank_ensemble --> shortlist --> alternatives
-    embeddings -.-> semantic
-    tokenizer -.-> lexical
+    classDef node fill:#ffffff,stroke:#4b5563,color:#111827
+    classDef adapter fill:#ffffff,stroke:#4f7cac,color:#17324d
+    class query,taxonomy_query_embedder,taxonomy_query_tokenizer,dense_node_scorer,bm25_node_scorer,hybrid_node_score_fusion,dense_mean_path_scorer,bm25_mean_path_scorer,hybrid_weighted_path_scorer,hybrid_path_rank_fusion,best_hybrid_path_decider,top_hybrid_paths_decider,primary,alternatives node
+    class taxonomy_embedding_adapter,sparse_tokenizer_adapter adapter
+    style pipeline fill:#fff8df,stroke:#c9a227,stroke-width:2px
+    style bindings fill:#eaf2ff,stroke:#4f7cac,stroke-width:2px
+    style preprocessors fill:#f8fafc,stroke:#cbd5e1
+    style node_scorers fill:#f8fafc,stroke:#cbd5e1
+    style node_fusions fill:#f8fafc,stroke:#cbd5e1
+    style path_scorers fill:#f8fafc,stroke:#cbd5e1
+    style path_fusions fill:#f8fafc,stroke:#cbd5e1
+    style deciders fill:#f8fafc,stroke:#cbd5e1
+    style outputs fill:#f8fafc,stroke:#cbd5e1
 ```
+
+</details>
 
 `tree-hybrid.yaml`:
 
 ```yaml
 version: 1
-name: support_hybrid
+name: hybrid_support_classifier
 kind: tree_classification
 
 preprocessors:
-  - name: semantic
+  - name: taxonomy_query_embedder
     type: embedding
-    binding: embeddings
+    binding: taxonomy_embedding_adapter
     dimensions: 3
-  - name: lexical
+  - name: taxonomy_query_tokenizer
     type: tokenizer
-    binding: tokenizer
+    binding: sparse_tokenizer_adapter
 
 node_scorers:
-  - name: dense_nodes
+  - name: dense_node_scorer
     type: dense
-    preprocessor: semantic
+    preprocessor: taxonomy_query_embedder
     similarity: cosine
-  - name: bm25_nodes
+  - name: bm25_node_scorer
     type: bm25
-    preprocessor: lexical
+    preprocessor: taxonomy_query_tokenizer
     k1: 1.2
     b: 0.75
 
 node_fusions:
-  - name: hybrid_score
+  - name: hybrid_node_score_fusion
     type: weighted_sum
-    inputs: [dense_nodes, bm25_nodes]
+    inputs: [dense_node_scorer, bm25_node_scorer]
     weights: [0.65, 0.35]
     normalization: min_max
 
 path_scorers:
-  - name: dense_mean
+  - name: dense_mean_path_scorer
     type: mean
-    input: dense_nodes
+    input: dense_node_scorer
     top_k: 20
-  - name: lexical_mean
+  - name: bm25_mean_path_scorer
     type: mean
-    input: bm25_nodes
+    input: bm25_node_scorer
     top_k: 20
-  - name: hybrid_weighted
+  - name: hybrid_weighted_path_scorer
     type: weighted_sum
-    input: hybrid_score
+    input: hybrid_node_score_fusion
     terms:
-      root: 0.10
-      mean: 0.25
-      leaf: 0.65
+      mean: 0.4
+      leaf: 0.6
     top_k: 20
 
 path_fusions:
-  - name: rank_ensemble
+  - name: hybrid_path_rank_fusion
     type: weighted_rrf
-    inputs: [dense_mean, lexical_mean]
-    weights: [0.65, 0.35]
+    inputs:
+      - dense_mean_path_scorer
+      - bm25_mean_path_scorer
+      - hybrid_weighted_path_scorer
+    weights: [0.3, 0.2, 0.5]
     k: 60
-    top_k: 20
+    top_k: 10
 
 deciders:
-  - name: hybrid_best
+  - name: best_hybrid_path_decider
     type: top_one
-    input: hybrid_weighted
-  - name: shortlist
+    input: hybrid_path_rank_fusion
+  - name: top_hybrid_paths_decider
     type: top_k
-    input: rank_ensemble
+    input: hybrid_path_rank_fusion
     count: 3
 
 outputs:
-  primary: hybrid_best
-  alternatives: shortlist
+  primary: best_hybrid_path_decider
+  alternatives: top_hybrid_paths_decider
 ```
 
-Bindings — se conserva el modelo semántico y se agrega el tokenizer incluido:
+Bindings — el tokenizer sirve tanto para la query como para completar los
+tokens ausentes de la taxonomía durante `build()`:
 
 ```python
 from chunkbuster import ComponentBindings, TextTokenizer
 
 bindings = ComponentBindings(
     preprocessors={
-        "embeddings": Embeddings(embedding_model),
-        "tokenizer": TextTokenizer(
+        "taxonomy_embedding_adapter": TaxonomyEmbeddingAdapter(embedding_model),
+        "sparse_tokenizer_adapter": TextTokenizer(
             mode="word",
             case_sensitive=False,
             strip_accents=True,
@@ -664,307 +804,313 @@ bindings = ComponentBindings(
         ),
     },
 )
-
-pipeline = await TreeClassificationPipeline.build(
-    taxonomy=taxonomy,
-    config="tree-hybrid.yaml",
-    bindings=bindings,
-)
 ```
 
-## Nivel 3: grafo completo con routing
+## Nivel 3: ensamble y decisión adaptativa completos
 
-El último nivel muestra todos los tipos disponibles de node fusion, path
-scorer, path fusion y decider. Cada decider recibe su propio ranking; el router
-los inspecciona y elige cuál ejecutar.
+El grafo conserva tres fusiones de nodos, tres formas de puntuar paths y tres
+fusiones de rankings. Los deciders ofrecen decisión rápida, shortlist,
+umbral o revisión LLM. El router elige cuál ejecutar para el output principal.
+
+En el último tramo, las flechas hacia el router indican los deciders permitidos
+por el YAML. Al ejecutar, el router inspecciona sus rankings y elige qué decider
+ejecutar; no recibe ni fusiona decisiones ya ejecutadas.
+
+<!-- ![Diagrama de adaptive_hybrid_classifier: flujo por etapas y adapters](docs/diagrams/adaptive_hybrid_classifier.svg)
+
+<details>
+<summary>Ver grafo Mermaid completo (referencia editable)</summary> -->
 
 ```mermaid
-flowchart LR
-    query([Query])
-
-    subgraph preprocessors[Preprocessors]
-        semantic[semantic]
-        lexical[lexical]
+flowchart TB
+    subgraph pipeline["TreeClassificationPipeline"]
+        direction TB
+        query([Query])
+        subgraph preprocessors[Preprocessors]
+            taxonomy_query_embedder["taxonomy_query_embedder<br/>dense embedding"]
+            taxonomy_query_tokenizer["taxonomy_query_tokenizer<br/>BM25 tokens"]
+        end
+        subgraph node_scorers[Node scorers]
+            dense_node_scorer["dense_node_scorer<br/>cosine"]
+            bm25_node_scorer["bm25_node_scorer<br/>BM25"]
+        end
+        subgraph node_fusions[Node fusions]
+            weighted_node_score_fusion["weighted_node_score_fusion<br/>weighted_sum"]
+            ranked_node_fusion["ranked_node_fusion<br/>weighted_rrf"]
+            consensus_node_fusion["consensus_node_fusion<br/>comb_mnz"]
+        end
+        subgraph path_scorers[Path scorers]
+            semantic_mean_path_scorer["semantic_mean_path_scorer<br/>mean"]
+            ranked_mean_path_scorer["ranked_mean_path_scorer<br/>mean"]
+            hybrid_weighted_path_scorer["hybrid_weighted_path_scorer<br/>weighted_sum"]
+            business_rule_path_scorer["business_rule_path_scorer<br/>custom"]
+        end
+        subgraph path_fusions[Path fusions]
+            path_rank_fusion["path_rank_fusion<br/>weighted_rrf"]
+            path_score_fusion["path_score_fusion<br/>weighted_sum"]
+            path_consensus_fusion["path_consensus_fusion<br/>comb_mnz"]
+        end
+        subgraph deciders[Deciders]
+            fast_top_one_decider["fast_top_one_decider<br/>top_one"]
+            shortlist_decider["shortlist_decider<br/>top_k"]
+            confidence_decider["confidence_decider<br/>threshold"]
+            llm_path_decider["llm_path_decider<br/>LLM"]
+        end
+        subgraph routers[Routers]
+            adaptive_decision_router[adaptive_decision_router]
+        end
+        subgraph outputs[Outputs]
+            primary([primary])
+            shortlist([shortlist])
+            confident([confident])
+        end
+        query --> taxonomy_query_embedder --> dense_node_scorer
+        query --> taxonomy_query_tokenizer --> bm25_node_scorer
+        dense_node_scorer --> weighted_node_score_fusion
+        bm25_node_scorer --> weighted_node_score_fusion
+        dense_node_scorer --> ranked_node_fusion
+        bm25_node_scorer --> ranked_node_fusion
+        dense_node_scorer --> consensus_node_fusion
+        bm25_node_scorer --> consensus_node_fusion
+        dense_node_scorer --> semantic_mean_path_scorer
+        ranked_node_fusion --> ranked_mean_path_scorer
+        weighted_node_score_fusion --> hybrid_weighted_path_scorer
+        consensus_node_fusion --> business_rule_path_scorer
+        semantic_mean_path_scorer --> path_rank_fusion
+        ranked_mean_path_scorer --> path_rank_fusion
+        hybrid_weighted_path_scorer --> path_rank_fusion
+        business_rule_path_scorer --> path_rank_fusion
+        semantic_mean_path_scorer --> path_score_fusion
+        hybrid_weighted_path_scorer --> path_score_fusion
+        business_rule_path_scorer --> path_consensus_fusion
+        hybrid_weighted_path_scorer --> path_consensus_fusion
+        path_rank_fusion --> fast_top_one_decider
+        path_rank_fusion --> shortlist_decider
+        path_score_fusion --> confidence_decider
+        path_consensus_fusion --> llm_path_decider
+        fast_top_one_decider --> adaptive_decision_router
+        confidence_decider --> adaptive_decision_router
+        llm_path_decider --> adaptive_decision_router
+        adaptive_decision_router --> primary
+        shortlist_decider --> shortlist
+        confidence_decider --> confident
     end
 
-    subgraph node_scorers[Node scorers]
-        dense_nodes[dense_nodes]
-        bm25_nodes[bm25_nodes]
+    subgraph bindings["ComponentBindings"]
+        direction LR
+        taxonomy_embedding_adapter[taxonomy_embedding_adapter]
+        sparse_tokenizer_adapter[sparse_tokenizer_adapter]
+        business_path_scorer_adapter[business_path_scorer_adapter]
+        llm_decider_adapter[llm_decider_adapter]
+        decision_router_adapter[decision_router_adapter]
     end
+    taxonomy_embedding_adapter -.-> taxonomy_query_embedder
+    sparse_tokenizer_adapter -.-> taxonomy_query_tokenizer
+    business_path_scorer_adapter -.-> business_rule_path_scorer
+    llm_decider_adapter -.-> llm_path_decider
+    decision_router_adapter -.-> adaptive_decision_router
 
-    subgraph node_fusions[Node fusions]
-        hybrid_score["hybrid_score<br/>weighted_sum"]
-        hybrid_rank["hybrid_rank<br/>weighted_rrf"]
-        hybrid_agreement["hybrid_agreement<br/>comb_mnz"]
-    end
-
-    subgraph path_scorers[Path scorers]
-        dense_mean["dense_mean<br/>mean"]
-        lexical_mean["lexical_mean<br/>mean"]
-        business_weighted["business_weighted<br/>weighted_sum"]
-        rank_mean["rank_mean<br/>mean"]
-        custom_agreement["custom_agreement<br/>custom"]
-    end
-
-    subgraph path_fusions[Path fusions]
-        rank_ensemble["rank_ensemble<br/>weighted_rrf"]
-        score_ensemble["score_ensemble<br/>weighted_sum"]
-        consensus_paths["consensus_paths<br/>comb_mnz"]
-    end
-
-    subgraph deciders[Deciders]
-        fast["fast<br/>top_one"]
-        shortlist["shortlist<br/>top_k"]
-        confident["confident<br/>threshold"]
-        expert["expert<br/>llm"]
-    end
-
-    subgraph routers[Routers]
-        policy_router[policy_router]
-    end
-
-    subgraph outputs[Outputs]
-        auto([auto])
-        shortlist_debug([shortlist_debug])
-    end
-
-    subgraph bindings[Bindings]
-        embeddings[embeddings]
-        tokenizer[tokenizer]
-        path_policy[path_policy]
-        llm_policy[llm_policy]
-        adaptive_router[adaptive_router]
-    end
-
-    query --> semantic --> dense_nodes
-    query --> lexical --> bm25_nodes
-    dense_nodes --> hybrid_score
-    bm25_nodes --> hybrid_score
-    dense_nodes --> hybrid_rank
-    bm25_nodes --> hybrid_rank
-    dense_nodes --> hybrid_agreement
-    bm25_nodes --> hybrid_agreement
-    dense_nodes --> dense_mean
-    bm25_nodes --> lexical_mean
-    hybrid_score --> business_weighted
-    hybrid_rank --> rank_mean
-    hybrid_agreement --> custom_agreement
-    dense_mean --> rank_ensemble
-    lexical_mean --> rank_ensemble
-    business_weighted --> score_ensemble
-    rank_mean --> score_ensemble
-    lexical_mean --> consensus_paths
-    custom_agreement --> consensus_paths
-    business_weighted --> fast
-    rank_ensemble --> shortlist
-    score_ensemble --> confident
-    consensus_paths --> expert
-    fast --> policy_router
-    shortlist --> policy_router
-    confident --> policy_router
-    expert --> policy_router
-    policy_router --> auto
-    shortlist --> shortlist_debug
-    embeddings -.-> semantic
-    tokenizer -.-> lexical
-    path_policy -.-> custom_agreement
-    llm_policy -.-> expert
-    adaptive_router -.-> policy_router
+    classDef node fill:#ffffff,stroke:#4b5563,color:#111827
+    classDef adapter fill:#ffffff,stroke:#4f7cac,color:#17324d
+    class query,taxonomy_query_embedder,taxonomy_query_tokenizer,dense_node_scorer,bm25_node_scorer,weighted_node_score_fusion,ranked_node_fusion,consensus_node_fusion,semantic_mean_path_scorer,ranked_mean_path_scorer,hybrid_weighted_path_scorer,business_rule_path_scorer,path_rank_fusion,path_score_fusion,path_consensus_fusion,fast_top_one_decider,shortlist_decider,confidence_decider,llm_path_decider,adaptive_decision_router,primary,shortlist,confident node
+    class taxonomy_embedding_adapter,sparse_tokenizer_adapter,business_path_scorer_adapter,llm_decider_adapter,decision_router_adapter adapter
+    style pipeline fill:#fff8df,stroke:#c9a227,stroke-width:2px
+    style bindings fill:#eaf2ff,stroke:#4f7cac,stroke-width:2px
+    style preprocessors fill:#f8fafc,stroke:#cbd5e1
+    style node_scorers fill:#f8fafc,stroke:#cbd5e1
+    style node_fusions fill:#f8fafc,stroke:#cbd5e1
+    style path_scorers fill:#f8fafc,stroke:#cbd5e1
+    style path_fusions fill:#f8fafc,stroke:#cbd5e1
+    style deciders fill:#f8fafc,stroke:#cbd5e1
+    style routers fill:#f8fafc,stroke:#cbd5e1
+    style outputs fill:#f8fafc,stroke:#cbd5e1
 ```
+
+</details>
 
 `tree-complete.yaml`:
 
 ```yaml
 version: 1
-name: support_complete
+name: adaptive_hybrid_classifier
 kind: tree_classification
 
 preprocessors:
-  - name: semantic
+  - name: taxonomy_query_embedder
     type: embedding
-    binding: embeddings
+    binding: taxonomy_embedding_adapter
     dimensions: 3
-  - name: lexical
+  - name: taxonomy_query_tokenizer
     type: tokenizer
-    binding: tokenizer
+    binding: sparse_tokenizer_adapter
 
 node_scorers:
-  - name: dense_nodes
+  - name: dense_node_scorer
     type: dense
-    preprocessor: semantic
+    preprocessor: taxonomy_query_embedder
     similarity: cosine
-  - name: bm25_nodes
+  - name: bm25_node_scorer
     type: bm25
-    preprocessor: lexical
+    preprocessor: taxonomy_query_tokenizer
     k1: 1.2
     b: 0.75
 
 node_fusions:
-  - name: hybrid_score
+  - name: weighted_node_score_fusion
     type: weighted_sum
-    inputs: [dense_nodes, bm25_nodes]
+    inputs: [dense_node_scorer, bm25_node_scorer]
     weights: [0.65, 0.35]
     normalization: min_max
-  - name: hybrid_rank
+  - name: ranked_node_fusion
     type: weighted_rrf
-    inputs: [dense_nodes, bm25_nodes]
-    weights: [0.65, 0.35]
+    inputs: [dense_node_scorer, bm25_node_scorer]
+    weights: [0.55, 0.45]
     k: 60
-  - name: hybrid_agreement
+  - name: consensus_node_fusion
     type: comb_mnz
-    inputs: [dense_nodes, bm25_nodes]
-    weights: [1.0, 1.0]
-    normalization: min_max
+    inputs: [dense_node_scorer, bm25_node_scorer]
+    normalization: z_score
 
 path_scorers:
-  - name: dense_mean
+  - name: semantic_mean_path_scorer
     type: mean
-    input: dense_nodes
-    top_k: 20
-  - name: lexical_mean
+    input: dense_node_scorer
+    top_k: 30
+  - name: ranked_mean_path_scorer
     type: mean
-    input: bm25_nodes
-    top_k: 20
-  - name: business_weighted
+    input: ranked_node_fusion
+    top_k: 30
+  - name: hybrid_weighted_path_scorer
     type: weighted_sum
-    input: hybrid_score
+    input: weighted_node_score_fusion
     terms:
-      root: 0.10
-      mean: 0.25
-      leaf: 0.65
-    top_k: 20
-  - name: rank_mean
-    type: mean
-    input: hybrid_rank
-    top_k: 20
-  - name: custom_agreement
+      root: 0.1
+      mean: 0.3
+      leaf: 0.6
+    top_k: 30
+  - name: business_rule_path_scorer
     type: custom
-    input: hybrid_agreement
-    binding: path_policy
-    top_k: 20
+    input: consensus_node_fusion
+    binding: business_path_scorer_adapter
+    top_k: 30
 
 path_fusions:
-  - name: rank_ensemble
+  - name: path_rank_fusion
     type: weighted_rrf
-    inputs: [dense_mean, lexical_mean]
-    weights: [0.65, 0.35]
+    inputs:
+      - semantic_mean_path_scorer
+      - ranked_mean_path_scorer
+      - hybrid_weighted_path_scorer
+      - business_rule_path_scorer
+    weights: [0.2, 0.2, 0.4, 0.2]
     k: 60
-    top_k: 20
-  - name: score_ensemble
+    top_k: 15
+  - name: path_score_fusion
     type: weighted_sum
-    inputs: [business_weighted, rank_mean]
-    weights: [0.8, 0.2]
-    normalization: z_score
-    top_k: 20
-  - name: consensus_paths
-    type: comb_mnz
-    inputs: [lexical_mean, custom_agreement]
+    inputs: [semantic_mean_path_scorer, hybrid_weighted_path_scorer]
     weights: [0.4, 0.6]
     normalization: min_max
-    top_k: 20
+    top_k: 15
+  - name: path_consensus_fusion
+    type: comb_mnz
+    inputs: [hybrid_weighted_path_scorer, business_rule_path_scorer]
+    normalization: z_score
+    top_k: 15
 
 deciders:
-  - name: fast
+  - name: fast_top_one_decider
     type: top_one
-    input: business_weighted
-  - name: shortlist
+    input: path_rank_fusion
+  - name: shortlist_decider
     type: top_k
-    input: rank_ensemble
+    input: path_rank_fusion
     count: 3
-  - name: confident
+  - name: confidence_decider
     type: threshold
-    input: score_ensemble
-    min_score: 0.20
+    input: path_score_fusion
+    min_score: 0.65
     count: 3
-  - name: expert
+  - name: llm_path_decider
     type: llm
-    input: consensus_paths
-    binding: llm_policy
+    input: path_consensus_fusion
+    binding: llm_decider_adapter
     count: 1
 
 routers:
-  - name: policy_router
-    deciders: [fast, shortlist, confident, expert]
-    binding: adaptive_router
+  - name: adaptive_decision_router
+    deciders:
+      - fast_top_one_decider
+      - confidence_decider
+      - llm_path_decider
+    binding: decision_router_adapter
     parameters:
-      fast_threshold: 0.85
-      confidence_threshold: 0.40
+      ambiguity_margin: 0.08
 
 outputs:
-  auto: policy_router
-  shortlist_debug: shortlist
+  primary: adaptive_decision_router
+  shortlist: shortlist_decider
+  confident: confidence_decider
 ```
 
-Bindings — suma una política de path, un adapter LLM y el router:
+Bindings:
 
 ```python
-from chunkbuster import ComponentBindings, DecisionSelection, TextTokenizer
+from chunkbuster import ComponentBindings, DecisionRoute, DecisionSelection, TextTokenizer
 
 
-class BusinessPathPolicy:
+class BusinessPathScorerAdapter:
     def score_path(self, path, node_scores):
-        return 0.7 * node_scores[-1] + 0.3 * min(node_scores)
+        base = sum(node_scores[node_id] for node_id in path.node_ids)
+        priority = float(path.nodes[-1].metadata.get("priority", 0.0))
+        return base + priority
 
 
-class LLMPolicy:
-    def __init__(self, client):
-        self.client = client
+class LLMPathDeciderAdapter:
+    def __init__(self, llm):
+        self.llm = llm
 
     async def decide(self, query, candidates, *, count):
-        answer = await self.client.choose(
-            query=query.text,
-            candidates=candidates.to_text(),
-            limit=count,
-        )
+        path_ids = await self.llm.choose_paths(query, candidates, limit=count)
         return DecisionSelection(
-            path_ids=tuple(answer.path_ids),
-            reason=answer.reason,
-            metadata={"model": answer.model},
+            path_ids=tuple(path_ids),
+            reason="Selected after semantic review",
         )
 
 
-class AdaptiveRouter:
+class AdaptiveDecisionRouterAdapter:
     def route(self, query, candidates, *, parameters):
-        fast = candidates["fast"]
-        if fast and fast[0].score >= parameters["fast_threshold"]:
-            return "fast"
-        confident = candidates["confident"]
-        if confident and confident[0].score >= parameters["confidence_threshold"]:
-            return "confident"
-        if len(candidates["shortlist"]) >= 3:
-            return "shortlist"
-        return "expert"
+        confidence = candidates["confidence_decider"]
+        if confidence:
+            return DecisionRoute("confidence_decider")
+        fast = candidates["fast_top_one_decider"]
+        margin = parameters["ambiguity_margin"]
+        if len(fast) == 1 and fast[0].score >= 1.0 - margin:
+            return DecisionRoute("fast_top_one_decider")
+        return DecisionRoute("llm_path_decider")
 
 
 bindings = ComponentBindings(
     preprocessors={
-        "embeddings": Embeddings(embedding_model),
-        "tokenizer": TextTokenizer(strip_accents=True),
+        "taxonomy_embedding_adapter": TaxonomyEmbeddingAdapter(embedding_model),
+        "sparse_tokenizer_adapter": TextTokenizer(
+            mode="word",
+            case_sensitive=False,
+            strip_accents=True,
+        ),
     },
-    path_scorers={"path_policy": BusinessPathPolicy()},
-    deciders={"llm_policy": LLMPolicy(llm_client)},
-    routers={"adaptive_router": AdaptiveRouter()},
+    path_scorers={
+        "business_path_scorer_adapter": BusinessPathScorerAdapter(),
+    },
+    deciders={
+        "llm_decider_adapter": LLMPathDeciderAdapter(llm),
+    },
+    routers={
+        "decision_router_adapter": AdaptiveDecisionRouterAdapter(),
+    },
 )
-
-pipeline = await TreeClassificationPipeline.build(
-    taxonomy=taxonomy,
-    config="tree-complete.yaml",
-    bindings=bindings,
-)
-result = await pipeline.classify("Me cobraron dos veces")
 ```
 
-## Qué demuestra la progresión
-
-- `input` convierte un retriever en una etapa restringida; no hace falta un
-  tipo especial para una cascada.
-- `weighted_rrf` fusiona posiciones; `weighted_sum` y `comb_mnz` fusionan
-  scores con `none`, `min_max` o `z_score`.
-- Un path scorer consume exactamente un node scorer o node fusion.
-- Una path fusion combina rankings de path scorers.
-- Los deciders pueden consumir rankings distintos y un router selecciona cuál
-  ejecutar.
-- Todo nodo declarado debe alcanzar un output directa o indirectamente.
-
-Vuelve al [README](README.md) para el quick start o consulta
-[ARCHITECTURE.md](ARCHITECTURE.md) para los contratos internos.
+El router recibe un mapping de solo lectura
+`decider_name -> Ranking[TaxonomyPath]`. Elige un decider permitido; no ejecuta
+ni modifica rankings. Cada rama declarada termina en un output, router o
+fusión, por lo que el build no acepta ramas colgadas.

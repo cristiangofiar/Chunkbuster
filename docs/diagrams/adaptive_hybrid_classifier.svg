@@ -1,0 +1,239 @@
+<svg xmlns="http://www.w3.org/2000/svg"
+viewBox="0 0 1240 2722" width="1240" height="2722"
+role="img" aria-labelledby="title desc">
+<title id="title">adaptive_hybrid_classifier</title>
+<desc id="desc">adaptive_hybrid_classifier: 3 tramos; 22 etapas y outputs; 30 dependencias.</desc>
+<defs>
+<marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+markerHeight="7" orient="auto-start-reverse">
+<path d="M 0 1 L 9 5 L 0 9 z" fill="#334155"/></marker>
+<marker id="binding" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7"
+markerHeight="7" orient="auto-start-reverse">
+<path d="M 0 1 L 9 5 L 0 9 z" fill="#537bad"/></marker>
+</defs>
+<rect width="100%" height="100%" fill="white"/>
+<rect x="104" y="8" width="1128" height="522" rx="20" fill="#fff9df" stroke="#b5a66a" stroke-width="1.5" />
+<text x="132" y="38" font-family="Arial, sans-serif" font-size="20" fill="#243247" text-anchor="start" font-weight="600">TreeClassificationPipeline  ·  01  Scoring de nodos</text>
+<rect x="128.0" y="73" width="357.3333333333333" height="437" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="144.0" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Preprocessors</text>
+<rect x="501.3333333333333" y="73" width="357.3333333333333" height="437" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="517.3333333333333" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Node scorers</text>
+<rect x="874.6666666666666" y="73" width="357.3333333333333" height="437" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="890.6666666666666" y="97" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Node fusions</text>
+<rect x="8" y="132" width="76" height="42" rx="14" fill="#fff" stroke="#334155" stroke-width="1.5" />
+<text x="46" y="159" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="middle" font-weight="400">Query</text>
+<polyline points="84,153 96,153 96,156 192.66666666666666,156" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="84,153 104,153 104,284 192.66666666666666,284" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="420.66666666666663,150 432.66666666666663,150 432.66666666666663,146 566.0,146" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="420.66666666666663,278 438.66666666666663,278 438.66666666666663,274 566.0,274" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,150 806.0,150 806.0,146 939.3333333333333,146" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,278 812.0,278 812.0,158 939.3333333333333,158" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,160 806.0,160 806.0,274 939.3333333333333,274" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,288 812.0,288 812.0,286 939.3333333333333,286" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,170 806.0,170 806.0,402 939.3333333333333,402" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,298 812.0,298 812.0,414 939.3333333333333,414" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<rect x="192.66666666666666" y="116" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="taxonomy_query_embedder" data-reference="false"/>
+<text x="306.66666666666663" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Embedder de query</text>
+<text x="306.66666666666663" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">taxonomy_query_embedder</text>
+<text x="306.66666666666663" y="207" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">embedding</text>
+<rect x="192.66666666666666" y="244" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="taxonomy_query_tokenizer" data-reference="false"/>
+<text x="306.66666666666663" y="267" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Tokenizer sparse</text>
+<text x="306.66666666666663" y="288" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">taxonomy_query_tokenizer</text>
+<text x="306.66666666666663" y="335" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">tokenizer</text>
+<rect x="566.0" y="116" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="dense_node_scorer" data-reference="false"/>
+<text x="680.0" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Similitud semántica</text>
+<text x="680.0" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">dense_node_scorer</text>
+<text x="680.0" y="207" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">dense</text>
+<rect x="763.0" y="106" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="781.0" y="121" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R1</text>
+<rect x="566.0" y="244" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="bm25_node_scorer" data-reference="false"/>
+<text x="680.0" y="267" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Relevancia BM25</text>
+<text x="680.0" y="288" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">bm25_node_scorer</text>
+<text x="680.0" y="335" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">bm25</text>
+<rect x="939.3333333333333" y="116" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="weighted_node_score_fusion" data-reference="false"/>
+<text x="1053.3333333333333" y="139" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Suma ponderada</text>
+<text x="1053.3333333333333" y="160" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">weighted_node_score_fusion</text>
+<text x="1053.3333333333333" y="207" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">weighted_sum · min_max</text>
+<rect x="1136.3333333333333" y="106" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="1154.3333333333333" y="121" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R2</text>
+<rect x="939.3333333333333" y="244" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="ranked_node_fusion" data-reference="false"/>
+<text x="1053.3333333333333" y="267" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Fusión por posición</text>
+<text x="1053.3333333333333" y="288" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">ranked_node_fusion</text>
+<text x="1053.3333333333333" y="335" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">weighted_rrf</text>
+<rect x="1136.3333333333333" y="234" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="1154.3333333333333" y="249" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R3</text>
+<rect x="939.3333333333333" y="372" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="consensus_node_fusion" data-reference="false"/>
+<text x="1053.3333333333333" y="395" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Fusión por consenso</text>
+<text x="1053.3333333333333" y="416" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">consensus_node_fusion</text>
+<text x="1053.3333333333333" y="463" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">comb_mnz · z_score</text>
+<rect x="1136.3333333333333" y="362" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="1154.3333333333333" y="377" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R4</text>
+<rect x="104" y="586" width="1128" height="230" rx="20" fill="#e7f0fe" stroke="#6d93c4" stroke-width="1.5" />
+<text x="132" y="794" font-family="Arial, sans-serif" font-size="17" fill="#315780" text-anchor="start" font-weight="600">ComponentBindings  ·  adapters Python</text>
+<rect x="192.66666666666666" y="605" width="228" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="306.66666666666663" y="629" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">taxonomy_embedding_adapter</text>
+<polyline points="192.66666666666666,637 125.0,637 125.0,204 192.66666666666666,204" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<rect x="192.66666666666666" y="687" width="228" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="306.66666666666663" y="711" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">sparse_tokenizer_adapter</text>
+<polyline points="192.66666666666666,719 129.0,719 129.0,332 192.66666666666666,332" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<text x="126" y="845" font-family="Arial, sans-serif" font-size="14" fill="#536174" text-anchor="start" font-weight="400">↓ Continúa en el siguiente tramo. R1, R2… identifican la misma salida en ambos tramos.</text>
+<rect x="104" y="872" width="1128" height="650" rx="20" fill="#fff9df" stroke="#b5a66a" stroke-width="1.5" />
+<text x="132" y="902" font-family="Arial, sans-serif" font-size="20" fill="#243247" text-anchor="start" font-weight="600">TreeClassificationPipeline  ·  02  Scoring de paths</text>
+<rect x="128.0" y="937" width="357.3333333333333" height="565" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="144.0" y="961" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Continuación</text>
+<rect x="501.3333333333333" y="937" width="357.3333333333333" height="565" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="517.3333333333333" y="961" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Path scorers</text>
+<rect x="874.6666666666666" y="937" width="357.3333333333333" height="565" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="890.6666666666666" y="961" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Path fusions</text>
+<polyline points="420.66666666666663,1014 432.66666666666663,1014 432.66666666666663,1010 566.0,1010" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="420.66666666666663,1142 438.66666666666663,1142 438.66666666666663,1138 566.0,1138" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="420.66666666666663,1270 444.66666666666663,1270 444.66666666666663,1266 566.0,1266" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="420.66666666666663,1398 432.66666666666663,1398 432.66666666666663,1394 566.0,1394" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,1014 806.0,1014 806.0,1010 939.3333333333333,1010" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,1142 812.0,1142 812.0,1022 939.3333333333333,1022" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,1270 818.0,1270 818.0,1034 939.3333333333333,1034" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,1398 806.0,1398 806.0,1046 939.3333333333333,1046" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,1024 806.0,1024 806.0,1138 939.3333333333333,1138" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,1280 818.0,1280 818.0,1150 939.3333333333333,1150" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,1290 818.0,1290 818.0,1266 939.3333333333333,1266" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="794.0,1408 806.0,1408 806.0,1278 939.3333333333333,1278" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<rect x="192.66666666666666" y="980" width="228" height="100" rx="9" fill="#f4f7fa" stroke="#94a3b8" stroke-width="1.5" data-node="dense_node_scorer" data-reference="true"/>
+<text x="306.66666666666663" y="1003" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Similitud semántica</text>
+<text x="306.66666666666663" y="1024" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">dense_node_scorer</text>
+<text x="306.66666666666663" y="1071" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">dense</text>
+<rect x="389.66666666666663" y="970" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="407.66666666666663" y="985" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R1</text>
+<rect x="192.66666666666666" y="1108" width="228" height="100" rx="9" fill="#f4f7fa" stroke="#94a3b8" stroke-width="1.5" data-node="ranked_node_fusion" data-reference="true"/>
+<text x="306.66666666666663" y="1131" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Fusión por posición</text>
+<text x="306.66666666666663" y="1152" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">ranked_node_fusion</text>
+<text x="306.66666666666663" y="1199" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">weighted_rrf</text>
+<rect x="389.66666666666663" y="1098" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="407.66666666666663" y="1113" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R3</text>
+<rect x="192.66666666666666" y="1236" width="228" height="100" rx="9" fill="#f4f7fa" stroke="#94a3b8" stroke-width="1.5" data-node="weighted_node_score_fusion" data-reference="true"/>
+<text x="306.66666666666663" y="1259" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Suma ponderada</text>
+<text x="306.66666666666663" y="1280" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">weighted_node_score_fusion</text>
+<text x="306.66666666666663" y="1327" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">weighted_sum · min_max</text>
+<rect x="389.66666666666663" y="1226" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="407.66666666666663" y="1241" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R2</text>
+<rect x="192.66666666666666" y="1364" width="228" height="100" rx="9" fill="#f4f7fa" stroke="#94a3b8" stroke-width="1.5" data-node="consensus_node_fusion" data-reference="true"/>
+<text x="306.66666666666663" y="1387" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Fusión por consenso</text>
+<text x="306.66666666666663" y="1408" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">consensus_node_fusion</text>
+<text x="306.66666666666663" y="1455" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">comb_mnz · z_score</text>
+<rect x="389.66666666666663" y="1354" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="407.66666666666663" y="1369" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R4</text>
+<rect x="566.0" y="980" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="semantic_mean_path_scorer" data-reference="false"/>
+<text x="680.0" y="1003" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Promedio del path</text>
+<text x="680.0" y="1024" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">semantic_mean_path_scorer</text>
+<text x="680.0" y="1071" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">mean</text>
+<rect x="566.0" y="1108" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="ranked_mean_path_scorer" data-reference="false"/>
+<text x="680.0" y="1131" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Promedio del path</text>
+<text x="680.0" y="1152" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">ranked_mean_path_scorer</text>
+<text x="680.0" y="1199" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">mean</text>
+<rect x="566.0" y="1236" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="hybrid_weighted_path_scorer" data-reference="false"/>
+<text x="680.0" y="1259" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Suma ponderada</text>
+<text x="680.0" y="1280" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">hybrid_weighted_path_scorer</text>
+<text x="680.0" y="1327" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">weighted_sum</text>
+<rect x="566.0" y="1364" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="business_rule_path_scorer" data-reference="false"/>
+<text x="680.0" y="1387" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Regla de negocio</text>
+<text x="680.0" y="1408" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">business_rule_path_scorer</text>
+<text x="680.0" y="1455" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">custom</text>
+<rect x="939.3333333333333" y="980" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="path_rank_fusion" data-reference="false"/>
+<text x="1053.3333333333333" y="1003" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Fusión por posición</text>
+<text x="1053.3333333333333" y="1024" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">path_rank_fusion</text>
+<text x="1053.3333333333333" y="1071" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">weighted_rrf</text>
+<rect x="1136.3333333333333" y="970" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="1154.3333333333333" y="985" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R5</text>
+<rect x="939.3333333333333" y="1108" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="path_score_fusion" data-reference="false"/>
+<text x="1053.3333333333333" y="1131" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Suma ponderada</text>
+<text x="1053.3333333333333" y="1152" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">path_score_fusion</text>
+<text x="1053.3333333333333" y="1199" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">weighted_sum · min_max</text>
+<rect x="1136.3333333333333" y="1098" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="1154.3333333333333" y="1113" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R6</text>
+<rect x="939.3333333333333" y="1236" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="path_consensus_fusion" data-reference="false"/>
+<text x="1053.3333333333333" y="1259" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Fusión por consenso</text>
+<text x="1053.3333333333333" y="1280" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">path_consensus_fusion</text>
+<text x="1053.3333333333333" y="1327" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">comb_mnz · z_score</text>
+<rect x="1136.3333333333333" y="1226" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="1154.3333333333333" y="1241" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R7</text>
+<rect x="104" y="1578" width="1128" height="148" rx="20" fill="#e7f0fe" stroke="#6d93c4" stroke-width="1.5" />
+<text x="132" y="1704" font-family="Arial, sans-serif" font-size="17" fill="#315780" text-anchor="start" font-weight="600">ComponentBindings  ·  adapters Python</text>
+<rect x="566.0" y="1597" width="228" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="680.0" y="1621" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">business_path_scorer_adapter</text>
+<polyline points="566.0,1629 510.3333333333333,1629 510.3333333333333,1452 566.0,1452" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<text x="126" y="1755" font-family="Arial, sans-serif" font-size="14" fill="#536174" text-anchor="start" font-weight="400">↓ Continúa en el siguiente tramo. R1, R2… identifican la misma salida en ambos tramos.</text>
+<rect x="104" y="1782" width="1128" height="650" rx="20" fill="#fff9df" stroke="#b5a66a" stroke-width="1.5" />
+<text x="132" y="1812" font-family="Arial, sans-serif" font-size="20" fill="#243247" text-anchor="start" font-weight="600">TreeClassificationPipeline  ·  03  Deciders, routing y outputs</text>
+<rect x="128.0" y="1847" width="264.0" height="565" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="144.0" y="1871" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Continuación</text>
+<rect x="408.0" y="1847" width="264.0" height="565" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="424.0" y="1871" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Deciders</text>
+<rect x="688.0" y="1847" width="264.0" height="565" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="704.0" y="1871" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Routers</text>
+<rect x="968.0" y="1847" width="264.0" height="565" rx="10" fill="#ffffff" stroke="#d7d9d4" stroke-width="1.5" />
+<text x="984.0" y="1871" font-family="Arial, sans-serif" font-size="16" fill="#243247" text-anchor="start" font-weight="600">Outputs</text>
+<polyline points="374.0,1924 386.0,1924 386.0,1920 426.0,1920" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="374.0,1934 386.0,1934 386.0,2048 426.0,2048" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="374.0,2052 392.0,2052 392.0,2176 426.0,2176" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="374.0,2180 398.0,2180 398.0,2304 426.0,2304" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="654.0,1924 666.0,1924 666.0,1920 706.0,1920" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="654.0,2180 678.0,2180 678.0,1932 706.0,1932" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="654.0,2308 666.0,2308 666.0,1944 706.0,1944" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="934.0,1924 946.0,1924 946.0,1936 986.0,1936" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="654.0,2052 669.0,2052 669.0,2422 969.0,2422 969.0,2064 986.0,2064" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<polyline points="654.0,2190 674.0,2190 674.0,2415 964.0,2415 964.0,2192 986.0,2192" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<rect x="146.0" y="1890" width="228" height="100" rx="9" fill="#f4f7fa" stroke="#94a3b8" stroke-width="1.5" data-node="path_rank_fusion" data-reference="true"/>
+<text x="260.0" y="1913" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Fusión por posición</text>
+<text x="260.0" y="1934" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">path_rank_fusion</text>
+<text x="260.0" y="1981" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">weighted_rrf</text>
+<rect x="343.0" y="1880" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="361.0" y="1895" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R5</text>
+<rect x="146.0" y="2018" width="228" height="100" rx="9" fill="#f4f7fa" stroke="#94a3b8" stroke-width="1.5" data-node="path_score_fusion" data-reference="true"/>
+<text x="260.0" y="2041" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Suma ponderada</text>
+<text x="260.0" y="2062" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">path_score_fusion</text>
+<text x="260.0" y="2109" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">weighted_sum · min_max</text>
+<rect x="343.0" y="2008" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="361.0" y="2023" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R6</text>
+<rect x="146.0" y="2146" width="228" height="100" rx="9" fill="#f4f7fa" stroke="#94a3b8" stroke-width="1.5" data-node="path_consensus_fusion" data-reference="true"/>
+<text x="260.0" y="2169" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Fusión por consenso</text>
+<text x="260.0" y="2190" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">path_consensus_fusion</text>
+<text x="260.0" y="2237" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">comb_mnz · z_score</text>
+<rect x="343.0" y="2136" width="36" height="21" rx="9" fill="#eef2f6" stroke="#94a3b8" stroke-width="1.5" />
+<text x="361.0" y="2151" font-family="Arial, sans-serif" font-size="12" fill="#243247" text-anchor="middle" font-weight="600">R7</text>
+<rect x="426.0" y="1890" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="fast_top_one_decider" data-reference="false"/>
+<text x="540.0" y="1913" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Elegir el mejor path</text>
+<text x="540.0" y="1934" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">fast_top_one_decider</text>
+<text x="540.0" y="1981" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">top_one</text>
+<rect x="426.0" y="2018" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="shortlist_decider" data-reference="false"/>
+<text x="540.0" y="2041" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Elegir varios paths</text>
+<text x="540.0" y="2062" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">shortlist_decider</text>
+<text x="540.0" y="2109" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">top_k</text>
+<rect x="426.0" y="2146" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="confidence_decider" data-reference="false"/>
+<text x="540.0" y="2169" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Aplicar umbral</text>
+<text x="540.0" y="2190" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">confidence_decider</text>
+<text x="540.0" y="2237" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">threshold</text>
+<rect x="426.0" y="2274" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="llm_path_decider" data-reference="false"/>
+<text x="540.0" y="2297" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Decisión LLM</text>
+<text x="540.0" y="2318" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">llm_path_decider</text>
+<text x="540.0" y="2365" font-family="Arial, sans-serif" font-size="11" fill="#64748b" text-anchor="middle" font-weight="400">llm</text>
+<rect x="706.0" y="1890" width="228" height="100" rx="9" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="adaptive_decision_router" data-reference="false"/>
+<text x="820.0" y="1913" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">Elige un decider</text>
+<text x="820.0" y="1934" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">adaptive_decision_router</text>
+<rect x="986.0" y="1906" width="228" height="60" rx="22" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="primary" data-reference="false"/>
+<text x="1100.0" y="1929" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">primary</text>
+<rect x="986.0" y="2034" width="228" height="60" rx="22" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="shortlist" data-reference="false"/>
+<text x="1100.0" y="2057" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">shortlist</text>
+<rect x="986.0" y="2162" width="228" height="60" rx="22" fill="#fff" stroke="#596579" stroke-width="1.5" data-node="confident" data-reference="false"/>
+<text x="1100.0" y="2185" font-family="Arial, sans-serif" font-size="15" fill="#243247" text-anchor="middle" font-weight="600">confident</text>
+<rect x="104" y="2488" width="1128" height="148" rx="20" fill="#e7f0fe" stroke="#6d93c4" stroke-width="1.5" />
+<text x="132" y="2614" font-family="Arial, sans-serif" font-size="17" fill="#315780" text-anchor="start" font-weight="600">ComponentBindings  ·  adapters Python</text>
+<rect x="426.0" y="2507" width="228" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="540.0" y="2531" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">llm_decider_adapter</text>
+<polyline points="426.0,2539 417.0,2539 417.0,2362 426.0,2362" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<rect x="706.0" y="2507" width="228" height="64" rx="8" fill="#fff" stroke="#7193be" stroke-width="1.5" />
+<text x="820.0" y="2531" font-family="monospace" font-size="13" fill="#475569" text-anchor="middle" font-weight="400">decision_router_adapter</text>
+<polyline points="820.0,2507 820.0,1990" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<polyline points="126,2687 170,2687" fill="none" stroke="#334155" stroke-width="2" stroke-linejoin="round"  marker-end="url(#arrow)"/>
+<text x="182" y="2692" font-family="Arial, sans-serif" font-size="13" fill="#243247" text-anchor="start" font-weight="400">Flujo / dependencia del YAML</text>
+<polyline points="535,2687 579,2687" fill="none" stroke="#537bad" stroke-width="1.6" stroke-linejoin="round" stroke-dasharray="6 5" marker-end="url(#binding)"/>
+<text x="591" y="2692" font-family="Arial, sans-serif" font-size="13" fill="#243247" text-anchor="start" font-weight="400">Adapter → etapa</text>
+</svg>

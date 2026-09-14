@@ -7,17 +7,16 @@ Para ver estos componentes crecer desde pipelines mínimos hasta grafos híbrido
 completos, consulta [EXAMPLES.md](EXAMPLES.md). El [README](README.md) conserva
 únicamente el quick start de cada producto.
 
-## Estado de esta entrega
+## Estado actual
 
-La primera entrega implementa dos recorridos completos, deliberadamente
-estrechos:
+El paquete implementa dos recorridos configurables:
 
 ```text
 Tree:
-query -> preprocessors -> node scorers/fusion -> path scorers/fusion -> router -> decider -> output
+query -> preprocessors -> node scorers/fusion -> path scorers/fusion -> optional router -> decider -> output
 
 Retrieval:
-query -> preprocessor -> source/candidate retrievers -> optional fusion -> output
+query -> preprocessors -> source/candidate retrievers -> optional fusion -> output
 ```
 
 | Área | Disponible |
@@ -28,10 +27,6 @@ query -> preprocessor -> source/candidate retrievers -> optional fusion -> outpu
 | Retrieval | Retrievers, DAG y fusiones `weighted_rrf`, `weighted_sum` o `comb_mnz` |
 | Configuración | YAML, JSON, mapping o modelo Pydantic |
 | Adapters | Objetos Python explícitos, síncronos o asíncronos |
-
-No están implementados todavía rerankers, scheduling concurrente ni
-aislamiento de fallos por output.
-Los diseños futuros no deben documentarse como capacidades actuales.
 
 ## Estructura real
 
@@ -70,10 +65,6 @@ tests/
 `core` contiene solo contratos realmente usados por ambos productos.
 `tree_classification` y `retrieval` dependen de `core`, pero no se importan
 entre sí. El paquete no importa SDKs de proveedores.
-
-No hay todavía `integrations/`, Registry, sistema de plugins ni runtime
-genérico. Se crearán solo cuando exista un segundo consumidor real para la
-abstracción correspondiente.
 
 ## Invariantes compartidos
 
@@ -141,16 +132,17 @@ item, sin añadir score ni rank. Para `TaxonomyPath`, `str(path)` concatena los
 labels raíz-hoja y omite descripciones y metadata.
 
 Las estrategias compartidas son `weighted_rrf`, `weighted_sum` y `comb_mnz`.
-Las dos últimas normalizan cada input con `none`, `min_max` o `z_score`; RRF
-opera sobre posiciones:
+Las dos últimas normalizan cada input con `none`, `min_max` o `z_score`;
+`weighted_rrf` opera sobre posiciones:
 
 ```text
-score(id) = sum(1 / (k + rank_en_cada_input))
+score(id) = sum(weight_del_input / (k + rank_en_el_input))
 ```
 
 Opera por identidad, no compara escalas originales y resuelve empates por el
-primer orden observado. Requiere al menos dos rankings y aplica su propio
-`top_k`.
+primer orden observado. Requiere al menos dos rankings. Retrieval y las path
+fusions configuran `top_k`; las node fusions no exponen un `top_k` configurable.
+Retrieval también acepta `rrf` como alias de `weighted_rrf`.
 
 ### DAG
 
@@ -185,18 +177,18 @@ La estructura es un bosque estricto:
 `taxonomy.py` usa mapas parent/children y DFS de stdlib. Enumera una vez cada
 path raíz-hoja en orden de entrada. La identidad de `TaxonomyPath` es la
 secuencia completa de IDs serializada de forma estable, aunque una hoja sea
-unívoca en el bosque actual. Esto preserva explicabilidad y no implementa aún
-una taxonomía DAG.
+unívoca en el bosque actual. La taxonomía es un bosque, no un DAG.
 
 ### Build
 
-El vertical actual exige:
+El pipeline exige:
 
-- uno o más preprocessors de embeddings o tokens;
+- uno o dos preprocessors: como máximo uno de embeddings y uno de tokens;
 - uno o más node scorers dense o BM25;
-- cero o más node fusions;
-- uno o más path scorers `mean`, `weighted_sum` o `custom`;
-- cero o más path fusions;
+- cero o más node fusions, cuyos inputs son node scorers;
+- uno o más path scorers `mean`, `weighted_sum` o `custom`, que consumen un
+  node scorer o node fusion;
+- cero o más path fusions, cuyos inputs son path scorers;
 - uno o más deciders alcanzables directa o indirectamente desde `outputs`;
 - cero o más routers terminales que solo pueden seleccionar deciders.
 
@@ -238,15 +230,16 @@ mapping de solo lectura entre cada decider permitido y su ranking recortado;
 los deciders pueden consumir ramas distintas. El router devuelve el decider a
 ejecutar, pero no ejecuta ni transforma componentes.
 
-`weighted_sum` admite `root`, niveles posteriores a la raíz mediante `level_n`,
-`mean`, `leaf`, `lowest` y `highest`; la suma no normaliza pesos. `custom`
-resuelve un binding de `ComponentBindings.path_scorers` con
+Los `terms` de un path scorer `weighted_sum` son un mapping de peso por nombre.
+Admite `root`, niveles posteriores a la raíz mediante `level_n`, `mean`, `leaf`,
+`lowest` y `highest`; la suma no normaliza pesos. `custom` resuelve un binding
+de `ComponentBindings.path_scorers` con
 `score_path(path, node_scores)`. Los deciders LLM se resuelven desde
 `ComponentBindings.deciders`; los routers, desde `ComponentBindings.routers`.
 Ambos pueden ser síncronos o asíncronos.
 
-`classify(query, outputs=...)` puede materializar solo un subconjunto de outputs
-públicos, pero no cambia configuración ni scoring.
+`classify(query, outputs=...)` ejecuta la clausura de dependencias necesaria
+para el subconjunto de outputs solicitado.
 
 ## RetrievalPipeline
 
@@ -273,6 +266,12 @@ El segundo solo puede devolver IDs presentes en `candidates`. El pipeline
 reemplaza cualquier copia del chunk por el objeto canónico de entrada y aplica
 `top_k`.
 
+Vector stores, búsquedas vectoriales locales e índices BM25 son roles habituales
+de un retriever fuente. Rerankers y selectores LLM son roles habituales de un
+retriever restringido: implementan `retrieve_candidates`, pueden filtrar o
+reordenar candidatos, pero no introducir chunks nuevos. No son tipos especiales
+de configuración; la diferencia la determinan `input` y el contrato del binding.
+
 Una fusion consume al menos dos rankings nombrados y usa `weighted_rrf`,
 `weighted_sum` o `comb_mnz`. “Hybrid” no es un tipo especial. “Cascade” es un
 retriever cuyo `input` referencia otro ranking.
@@ -289,12 +288,10 @@ aunque lo compartan varios retrievers. Los rankings intermedios viven solo en
 esa llamada.
 
 Cada output publica `terminal_node`, `ranking` y un status derivado
-`completed|empty`. `retrieve(query, outputs=...)` puede seleccionar un subset
-de grupos públicos.
+`completed|empty`. `retrieve(query, outputs=...)` selecciona qué outputs
+devuelve, aunque el DAG configurado se ejecuta completo.
 
-Esta ejecución es deliberadamente secuencial. Todavía no hay scheduler de
-nodos listos, semáforos ni resultados `failed`: cualquier error aborta la
-llamada completa.
+La ejecución es secuencial y cualquier error aborta la llamada completa.
 
 ## Fronteras externas
 
@@ -320,7 +317,7 @@ No se crean excepciones por cada clase interna.
 
 ## Tests y política de cambios
 
-Los tests nuevos cubren contratos, no detalles accidentales:
+La suite cubre contratos, no detalles accidentales:
 
 - unicidad y scores finitos de rankings;
 - tokenización, normalizaciones y fusiones deterministas;
@@ -328,24 +325,10 @@ Los tests nuevos cubren contratos, no detalles accidentales:
 - embeddings provistos o generados y tokens parciales completados una vez;
 - path scoring ponderado/custom y selección LLM canonicalizada;
 - carga equivalente desde dict, YAML y JSON;
-- source/candidate retrieval, preprocessing compartido y RRF;
+- source/candidate retrieval, preprocessing compartido y fusiones;
 - weighted score fusion compartida entre Tree y Retrieval;
 - rechazo de IDs inventados y ciclos del DAG.
 
-Una nueva capacidad debe añadir primero el test mínimo que demuestra el
-vertical completo. Las abstracciones compartidas se extraen cuando ambos
-productos ya exhiben el mismo contrato, no por anticipación.
-
-## Próximos verticales
-
-Orden orientativo, sin promesa de compatibilidad hasta estabilizar la API:
-
-1. Transformaciones externas: rerankers y canonicalización común.
-2. Selector LLM de rankings para Retrieval.
-3. Runtime: nodos independientes concurrentes, límites y aislamiento de fallos
-   por output.
-4. Integraciones concretas con embeddings y vectorstores, una por vez.
-
-Siguen fuera de alcance hasta que exista un caso medido: plugin discovery,
-workflow engine genérico, taxonomía DAG, persistencia propia, CLI, servidor
-HTTP, cache distribuido y compatibilidad con la API del prototipo.
+Una nueva capacidad debe añadir el test mínimo que demuestra el vertical
+completo. Las abstracciones compartidas se extraen cuando ambos productos ya
+exhiben el mismo contrato, no por anticipación.
