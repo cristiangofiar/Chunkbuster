@@ -78,28 +78,19 @@ class WeightedSumPathScorerConfig(StrictConfig):
     name: Name
     type: Literal["weighted_sum"]
     input: Name
-    terms: Annotated[tuple[dict[str, float], ...], Field(min_length=1)]
+    terms: Annotated[dict[str, float], Field(min_length=1)]
     top_k: PositiveInt = 20
 
     @field_validator("terms")
     @classmethod
-    def validate_terms(
-        cls, terms: tuple[dict[str, float], ...]
-    ) -> tuple[dict[str, float], ...]:
-        names = []
-        for term in terms:
-            if len(term) != 1:
-                raise ValueError("each weighted_sum term must contain one key")
-            name = next(iter(term))
+    def validate_terms(cls, terms: dict[str, float]) -> dict[str, float]:
+        for name in terms:
             suffix = name.removeprefix("level_")
             is_level = name.startswith("level_") and suffix.isdigit()
             if name not in {"root", "mean", "leaf", "lowest", "highest"} and not (
                 is_level and int(suffix) > 0
             ):
                 raise ValueError(f"unknown weighted_sum term {name!r}")
-            names.append(name)
-        if len(names) != len(set(names)):
-            raise ValueError("weighted_sum term names must be unique")
         return terms
 
 

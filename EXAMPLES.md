@@ -479,9 +479,9 @@ path_scorers:
     type: weighted_sum
     input: dense_nodes
     terms:
-      - root: 0.10
-      - mean: 0.30
-      - leaf: 0.60
+      root: 0.10
+      mean: 0.30
+      leaf: 0.60
     top_k: 10
 
 deciders:
@@ -621,9 +621,9 @@ path_scorers:
     type: weighted_sum
     input: hybrid_score
     terms:
-      - root: 0.10
-      - mean: 0.25
-      - leaf: 0.65
+      root: 0.10
+      mean: 0.25
+      leaf: 0.65
     top_k: 20
 
 path_fusions:
@@ -829,9 +829,9 @@ path_scorers:
     type: weighted_sum
     input: hybrid_score
     terms:
-      - root: 0.10
-      - mean: 0.25
-      - leaf: 0.65
+      root: 0.10
+      mean: 0.25
+      leaf: 0.65
     top_k: 20
   - name: rank_mean
     type: mean

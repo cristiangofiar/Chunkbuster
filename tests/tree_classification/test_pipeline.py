@@ -238,15 +238,15 @@ async def test_weighted_sum_combines_path_score_features() -> None:
             "name": "weighted_paths",
             "type": "weighted_sum",
             "input": "dense_nodes",
-            "terms": [
-                {"root": 0.1},
-                {"level_1": 0.4},
-                {"level_2": 0.1},
-                {"mean": 0.1},
-                {"leaf": 0.1},
-                {"lowest": 0.1},
-                {"highest": 0.1},
-            ],
+            "terms": {
+                "root": 0.1,
+                "level_1": 0.4,
+                "level_2": 0.1,
+                "mean": 0.1,
+                "leaf": 0.1,
+                "lowest": 0.1,
+                "highest": 0.1,
+            },
             "top_k": 10,
         }
     ]
@@ -274,10 +274,9 @@ async def test_weighted_sum_combines_path_score_features() -> None:
 @pytest.mark.parametrize(
     "terms",
     (
-        [{"weakest": 1.0}],
-        [{"level_0": 1.0}],
-        [{"mean": 0.5, "leaf": 0.5}],
-        [{"mean": 0.5}, {"mean": 0.5}],
+        {"weakest": 1.0},
+        {"level_0": 1.0},
+        [{"mean": 1.0}],
     ),
 )
 async def test_weighted_sum_rejects_invalid_terms(terms) -> None:

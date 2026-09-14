@@ -165,8 +165,7 @@ def builtin_path_score(
         return sum(node_scores) / len(node_scores)
 
     score = 0.0
-    for term in spec.terms:
-        name, weight = next(iter(term.items()))
+    for name, weight in spec.terms.items():
         if name == "mean":
             value = sum(node_scores) / len(node_scores)
         elif name == "root":
