@@ -56,8 +56,8 @@ class TextTokenizer:
             if len(token) >= self.min_length and token not in self.stop_words
         )
 
-    def prepare_query(self, text: str) -> tuple[str, ...]:
+    async def prepare_query(self, text: str) -> tuple[str, ...]:
         return self.tokenize(text)
 
-    def prepare_documents(self, texts) -> tuple[tuple[str, ...], ...]:
+    async def prepare_documents(self, texts) -> tuple[tuple[str, ...], ...]:
         return tuple(self.tokenize(text) for text in texts)

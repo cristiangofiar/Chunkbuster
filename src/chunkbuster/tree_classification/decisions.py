@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from types import MappingProxyType
 
-from ..core._async import resolve
 from ..core.models import Query
 from ..core.ranking import Ranking
 from ..errors import InvalidModelOutputError
@@ -45,7 +44,7 @@ async def decide_with_llm(
     query: Query,
     ranking: Ranking[TaxonomyPath],
 ) -> DecisionSelection:
-    raw = await resolve(component.decide(query, ranking, count=spec.count))
+    raw = await component.decide(query, ranking, count=spec.count)
     if not isinstance(raw, DecisionSelection):
         raise InvalidModelOutputError("LLM decider must return DecisionSelection")
     return raw
@@ -59,7 +58,7 @@ async def route_decision(
 ) -> str:
     parameters = MappingProxyType(dict(spec.parameters))
     candidates = MappingProxyType(dict(rankings))
-    raw = await resolve(component.route(query, candidates, parameters=parameters))
+    raw = await component.route(query, candidates, parameters=parameters)
     if isinstance(raw, DecisionRoute):
         decider_name = raw.decider
     elif isinstance(raw, str) and raw:

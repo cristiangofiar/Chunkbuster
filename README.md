@@ -20,11 +20,13 @@ combínalos y publica varios resultados sin acoplarte a un proveedor.
   construir rankings.
 - **Configurable sin magia:** YAML describe el grafo; Python implementa solo
   las integraciones externas.
+- **Ramas concurrentes:** cada nodo arranca cuando sus dependencias están listas,
+  sin esperar a otras ramas ni a todo su nivel.
 - **Seguro al construir:** referencias rotas, ciclos, nombres duplicados y
   ramas sin salida fallan antes de procesar tráfico.
 - **Proveedor agnóstico:** trae tu vector store, buscador, modelo de embeddings o
   LLM. Chunkbuster no gestiona SDKs, credenciales ni secretos.
-- **Contratos pequeños:** bindings síncronos y asíncronos; resultados tipados e
+- **Contratos pequeños:** bindings asíncronos; resultados tipados e
   inmutables.
 
 ## Instalación
@@ -401,9 +403,10 @@ router recibe un mapping de solo lectura
 Tree solo exige `prepare_documents(texts)` cuando debe completar la taxonomía:
 genera todos los embeddings si no hay ninguno y únicamente los tokens ausentes.
 
-Todos los bindings pueden ser síncronos o asíncronos. La configuración acepta
-un `Mapping`, una ruta `.yaml`/`.yml`, una ruta `.json` o un modelo Pydantic ya
-validado. Las claves desconocidas fallan.
+Todos los métodos del contrato de bindings deben declararse con `async def` y
+se llaman con `await`. `build()` rechaza métodos que no sean asíncronos. La
+configuración acepta un `Mapping`, una ruta `.yaml`/`.yml`, una ruta `.json` o
+un modelo Pydantic ya validado. Las claves desconocidas fallan.
 
 ## Documentación
 

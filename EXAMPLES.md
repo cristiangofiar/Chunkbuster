@@ -121,7 +121,7 @@ class RerankerTokenizerAdapter:
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
 
-    def prepare_query(self, text):
+    async def prepare_query(self, text):
         return self.tokenizer.encode(text)
 
 
@@ -283,7 +283,7 @@ class LocalVectorSearchAdapter:
     def __init__(self, index):
         self.index = index
 
-    def retrieve(self, vector, *, top_k):
+    async def retrieve(self, vector, *, top_k):
         return self.index.search(vector, top_k=top_k)
 
 
@@ -480,7 +480,7 @@ class BM25SearchAdapter:
     def __init__(self, index):
         self.index = index
 
-    def retrieve(self, tokens, *, top_k):
+    async def retrieve(self, tokens, *, top_k):
         return self.index.search(tokens, top_k=top_k)
 
 
@@ -1059,7 +1059,7 @@ from chunkbuster import ComponentBindings, DecisionRoute, DecisionSelection, Tex
 
 
 class BusinessPathScorerAdapter:
-    def score_path(self, path, node_scores):
+    async def score_path(self, path, node_scores):
         base = sum(node_scores[node_id] for node_id in path.node_ids)
         priority = float(path.nodes[-1].metadata.get("priority", 0.0))
         return base + priority
@@ -1078,7 +1078,7 @@ class LLMPathDeciderAdapter:
 
 
 class AdaptiveDecisionRouterAdapter:
-    def route(self, query, candidates, *, parameters):
+    async def route(self, query, candidates, *, parameters):
         confidence = candidates["confidence_decider"]
         if confidence:
             return DecisionRoute("confidence_decider")

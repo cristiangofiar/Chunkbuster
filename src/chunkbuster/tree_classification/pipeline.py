@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from asyncio import gather
 from collections.abc import Iterable
 from dataclasses import replace
+from inspect import iscoroutinefunction
 from types import MappingProxyType
 
-from ..core._async import resolve
+from ..core._async import task_scope
 from ..core.config import ConfigInput, by_name, load_config
 from ..core.contracts import ComponentBindings
 from ..core.dag import CompiledDAG, compile_dag
@@ -223,10 +225,10 @@ class TreeClassificationPipeline:
                 raise BuildError(
                     f"missing preprocessor binding {spec.binding!r}"
                 ) from exc
-            if not callable(getattr(component, "prepare_query", None)):
+            if not iscoroutinefunction(getattr(component, "prepare_query", None)):
                 raise BuildError(
                     f"preprocessor binding {spec.binding!r} must define "
-                    "prepare_query(text)"
+                    "async prepare_query(text)"
                 )
             bound_preprocessors[spec.name] = component
 
@@ -240,9 +242,9 @@ class TreeClassificationPipeline:
                 raise BuildError(
                     f"missing path scorer binding {spec.binding!r}"
                 ) from exc
-            if not callable(getattr(component, "score_path", None)):
+            if not iscoroutinefunction(getattr(component, "score_path", None)):
                 raise BuildError(
-                    "custom path scorer must define score_path(path, scores)"
+                    "custom path scorer must define async score_path(path, scores)"
                 )
             bound_path_scorers[spec.name] = component
 
@@ -254,8 +256,8 @@ class TreeClassificationPipeline:
                 component = bindings.deciders[spec.binding]
             except KeyError as exc:
                 raise BuildError(f"missing decider binding {spec.binding!r}") from exc
-            if not callable(getattr(component, "decide", None)):
-                raise BuildError("LLM decider binding must define decide()")
+            if not iscoroutinefunction(getattr(component, "decide", None)):
+                raise BuildError("LLM decider binding must define async decide()")
             bound_deciders[spec.name] = component
 
         bound_routers = {}
@@ -264,8 +266,8 @@ class TreeClassificationPipeline:
                 component = bindings.routers[spec.binding]
             except KeyError as exc:
                 raise BuildError(f"missing router binding {spec.binding!r}") from exc
-            if not callable(getattr(component, "route", None)):
-                raise BuildError("router binding must define route()")
+            if not iscoroutinefunction(getattr(component, "route", None)):
+                raise BuildError("router binding must define async route()")
             bound_routers[spec.name] = component
 
         snapshot = build_snapshot(taxonomy)
@@ -352,9 +354,9 @@ class TreeClassificationPipeline:
     @staticmethod
     async def _prepare_documents(component, texts, *, label: str) -> tuple:
         prepare = getattr(component, "prepare_documents", None)
-        if not callable(prepare):
-            raise BuildError(f"{label} must define prepare_documents(texts)")
-        raw = await resolve(prepare(texts))
+        if not iscoroutinefunction(prepare):
+            raise BuildError(f"{label} must define async prepare_documents(texts)")
+        raw = await prepare(texts)
         try:
             values = tuple(raw)
         except TypeError as exc:
@@ -401,25 +403,23 @@ class TreeClassificationPipeline:
         prepared = {}
         node_scores: dict[str, NodeScores] = {}
         path_rankings: dict[str, Ranking[TaxonomyPath]] = {}
-        for name in self._dag.order:
-            if name not in needed_nodes or name in self._preprocessor_specs:
-                continue
-            if name in self._node_scorer_specs:
+
+        async def run_node(name):
+            await gather(*(nodes[source] for source in self._dag.dependencies[name]))
+            if name in self._preprocessor_specs:
+                preprocessor = self._preprocessor_specs[name]
+                raw = await self._preprocessors[name].prepare_query(query.text)
+                prepared[name] = (
+                    validate_vector(
+                        raw,
+                        dimensions=preprocessor.dimensions,
+                        label="query embedding",
+                    )
+                    if isinstance(preprocessor, EmbeddingPreprocessorConfig)
+                    else validate_tokens(raw, label="query tokens")
+                )
+            elif name in self._node_scorer_specs:
                 spec = self._node_scorer_specs[name]
-                if spec.preprocessor not in prepared:
-                    raw = await resolve(
-                        self._preprocessors[spec.preprocessor].prepare_query(query.text)
-                    )
-                    preprocessor = self._preprocessor_specs[spec.preprocessor]
-                    prepared[spec.preprocessor] = (
-                        validate_vector(
-                            raw,
-                            dimensions=preprocessor.dimensions,
-                            label="query embedding",
-                        )
-                        if isinstance(preprocessor, EmbeddingPreprocessorConfig)
-                        else validate_tokens(raw, label="query tokens")
-                    )
                 representation = prepared[spec.preprocessor]
                 if isinstance(spec, DenseNodeScorerConfig):
                     node_scores[name] = score_nodes(
@@ -456,19 +456,36 @@ class TreeClassificationPipeline:
                 node_scores[name] = {item.id: item.score for item in fused}
             elif name in self._path_scorer_specs:
                 spec = self._path_scorer_specs[name]
-                scores = {}
-                for path in self._snapshot.paths:
-                    values = tuple(
+
+                def values_for(path):
+                    return tuple(
                         node_scores[spec.input].get(node_id, 0.0)
                         for node_id in path.node_ids
                     )
-                    if isinstance(spec, CustomPathScorerConfig):
-                        raw = await resolve(
-                            self._path_scorers[name].score_path(path, values)
+
+                if isinstance(spec, CustomPathScorerConfig):
+
+                    async def score_path(path):
+                        raw = await self._path_scorers[name].score_path(
+                            path, values_for(path)
                         )
-                        scores[path.id] = validate_path_score(raw, path=path)
-                    else:
-                        scores[path.id] = builtin_path_score(path, values, spec)
+                        return validate_path_score(raw, path=path)
+
+                    values = await gather(
+                        *(start(score_path(path)) for path in self._snapshot.paths)
+                    )
+                    scores = dict(
+                        zip(
+                            (path.id for path in self._snapshot.paths),
+                            values,
+                            strict=True,
+                        )
+                    )
+                else:
+                    scores = {
+                        path.id: builtin_path_score(path, values_for(path), spec)
+                        for path in self._snapshot.paths
+                    }
                 path_rankings[name] = rank_paths(
                     self._snapshot, scores, source=spec.name
                 )
@@ -493,35 +510,45 @@ class TreeClassificationPipeline:
                 producer = self._path_fusion_specs[input_name]
             return ranking.top(producer.top_k)
 
-        decisions = {}
-        routes = {}
-        result = {}
-        for output_name in requested:
+        async def run_decider(name):
+            spec = deciders[name]
+            await nodes[spec.input]
+            full = isinstance(spec, LLMDeciderConfig)
+            ranking = ranking_for(name, full=full)
+            selection = (
+                await decide_with_llm(spec, self._deciders[name], query, ranking)
+                if full
+                else decide(spec, ranking)
+            )
+            return materialize_decision(spec, selection, ranking)
+
+        async def run_router(name):
+            spec = routers[name]
+            await gather(*(nodes[deciders[source].input] for source in spec.deciders))
+            candidates = {source: ranking_for(source) for source in spec.deciders}
+            return await route_decision(spec, self._routers[name], query, candidates)
+
+        async def run_output(output_name):
             target = self._config.outputs[output_name]
             if target in routers:
                 if target not in routes:
-                    candidates = {
-                        name: ranking_for(name) for name in routers[target].deciders
-                    }
-                    routes[target] = await route_decision(
-                        routers[target], self._routers[target], query, candidates
-                    )
-                decider_name = routes[target]
+                    routes[target] = start(run_router(target))
+                decider_name = await routes[target]
             else:
                 decider_name = target
             if decider_name not in decisions:
-                spec = deciders[decider_name]
-                full = isinstance(spec, LLMDeciderConfig)
-                ranking = ranking_for(decider_name, full=full)
-                selection = (
-                    await decide_with_llm(
-                        spec, self._deciders[decider_name], query, ranking
-                    )
-                    if full
-                    else decide(spec, ranking)
-                )
-                decisions[decider_name] = materialize_decision(spec, selection, ranking)
-            result[output_name] = decisions[decider_name]
+                decisions[decider_name] = start(run_decider(decider_name))
+            return await decisions[decider_name]
+
+        async with task_scope() as start:
+            nodes = {}
+            for name in self._dag.order:
+                if name in needed_nodes:
+                    nodes[name] = start(run_node(name))
+            decisions = {}
+            routes = {}
+            values = await gather(*(start(run_output(name)) for name in requested))
+        result = dict(zip(requested, values, strict=True))
         return TreeClassificationResult(
             query.id,
             self._snapshot.taxonomy.id,

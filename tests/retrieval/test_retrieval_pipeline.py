@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+from copy import deepcopy
+
 import pytest
 
 from chunkbuster.core import ComponentBindings, RankedItem, Ranking
@@ -82,6 +85,119 @@ BASE_CONFIG = {
     ],
     "outputs": {"primary": "combined", "cascade": "filtered"},
 }
+
+
+async def test_independent_retrievers_overlap_and_cascade_does_not_wait_for_sibling(
+    task_factory,
+):
+    sibling_started = asyncio.Event()
+    cascade_finished = asyncio.Event()
+    preprocessor = CountingPreprocessor()
+
+    class FirstSource:
+        async def retrieve(self, query, *, top_k):
+            await sibling_started.wait()
+            return _ranking("a", "b")
+
+    class SlowSource:
+        async def retrieve(self, query, *, top_k):
+            sibling_started.set()
+            await cascade_finished.wait()
+            return _ranking("b", "c")
+
+    class Cascade:
+        async def retrieve_candidates(self, query, candidates, *, top_k):
+            assert candidates.ids == ("a", "b")
+            cascade_finished.set()
+            return _ranking("b")
+
+    pipeline = await RetrievalPipeline.build(
+        config=deepcopy(BASE_CONFIG),
+        bindings=ComponentBindings(
+            preprocessors={"shared": preprocessor},
+            retrievers={
+                "source_a": FirstSource(),
+                "source_b": SlowSource(),
+                "candidate": Cascade(),
+            },
+        ),
+    )
+
+    result = await asyncio.wait_for(pipeline.retrieve("query"), timeout=2)
+
+    assert preprocessor.calls == 1
+    assert result.outputs["primary"].ranking.ids == ("b", "c")
+
+
+@pytest.mark.parametrize("cancel_caller", [False, True])
+async def test_retrieval_cancels_other_branches_on_failure_or_caller_cancellation(
+    cancel_caller,
+    task_factory,
+):
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    class BlockedSource:
+        async def retrieve(self, query, *, top_k):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                stopped.set()
+
+    class FailingSource:
+        async def retrieve(self, query, *, top_k):
+            await started.wait()
+            raise ValueError("retriever failed")
+
+    retrievers = {"source_a": BlockedSource(), "candidate": CandidateRetriever()}
+    retrievers["source_b"] = (
+        SourceRetriever(_ranking("b")) if cancel_caller else FailingSource()
+    )
+    pipeline = await RetrievalPipeline.build(
+        config=deepcopy(BASE_CONFIG),
+        bindings=ComponentBindings(
+            preprocessors={"shared": CountingPreprocessor()}, retrievers=retrievers
+        ),
+    )
+    caller = asyncio.create_task(pipeline.retrieve("query"))
+    await asyncio.wait_for(started.wait(), timeout=2)
+    if cancel_caller:
+        caller.cancel()
+    error = asyncio.CancelledError if cancel_caller else ValueError
+    with pytest.raises(error):
+        await asyncio.wait_for(caller, timeout=2)
+    assert stopped.is_set()
+
+
+@pytest.mark.parametrize(
+    ("group", "binding", "method"),
+    [
+        ("preprocessors", "shared", "prepare_query"),
+        ("retrievers", "source_a", "retrieve"),
+        ("retrievers", "candidate", "retrieve_candidates"),
+    ],
+)
+async def test_build_requires_async_binding_methods(group, binding, method):
+    class InvalidBinding:
+        pass
+
+    component = InvalidBinding()
+    setattr(component, method, lambda *args, **kwargs: pytest.fail("binding executed"))
+    bindings = {
+        "preprocessors": {"shared": CountingPreprocessor()},
+        "retrievers": {
+            "source_a": SourceRetriever(_ranking("a", "b")),
+            "source_b": SourceRetriever(_ranking("b", "c")),
+            "candidate": CandidateRetriever(),
+        },
+    }
+    bindings[group][binding] = component
+
+    with pytest.raises(BuildError, match=f"async {method}"):
+        await RetrievalPipeline.build(
+            config=BASE_CONFIG, bindings=ComponentBindings(**bindings)
+        )
 
 
 @pytest.mark.asyncio

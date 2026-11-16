@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
@@ -115,6 +116,317 @@ def _taxonomy(*, with_embeddings: bool) -> Taxonomy:
 
 def _bindings(preprocessor: SpyEmbeddingPreprocessor) -> ComponentBindings:
     return ComponentBindings(preprocessors={"embedding": preprocessor})
+
+
+async def test_tree_branch_can_decide_while_independent_preprocessor_is_blocked(
+    task_factory,
+):
+    lexical_started = asyncio.Event()
+    semantic_decided = asyncio.Event()
+
+    class Embedding:
+        async def prepare_query(self, text):
+            await lexical_started.wait()
+            return (1.0, 0.0)
+
+    class Tokenizer:
+        async def prepare_documents(self, texts):
+            return tuple(("a",) for _ in texts)
+
+        async def prepare_query(self, text):
+            lexical_started.set()
+            await semantic_decided.wait()
+            return ("a",)
+
+    class SemanticDecider:
+        async def decide(self, query, candidates, *, count):
+            semantic_decided.set()
+            return DecisionSelection((candidates.items[0].id,))
+
+    config = _config()
+    config["preprocessors"].append(
+        {"name": "lexical", "type": "tokenizer", "binding": "tokenizer"}
+    )
+    config["node_scorers"].append(
+        {"name": "bm25_nodes", "type": "bm25", "preprocessor": "lexical"}
+    )
+    config["path_scorers"].append(
+        {"name": "lexical_paths", "type": "mean", "input": "bm25_nodes"}
+    )
+    config["deciders"] = [
+        {"name": "semantic", "type": "llm", "input": "mean_paths", "binding": "llm"},
+        {"name": "lexical", "type": "top_one", "input": "lexical_paths"},
+    ]
+    config["outputs"] = {"primary": "semantic", "secondary": "lexical"}
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": Embedding(), "tokenizer": Tokenizer()},
+            deciders={"llm": SemanticDecider()},
+        ),
+    )
+
+    result = await asyncio.wait_for(pipeline.classify("query"), timeout=2)
+
+    assert list(result.outputs) == ["primary", "secondary"]
+    assert all(output.status == "selected" for output in result.outputs.values())
+
+
+async def test_custom_path_calls_overlap_and_fusion_waits_for_all_branches(
+    task_factory,
+):
+    started = set()
+    all_started = asyncio.Event()
+    finished = set()
+
+    class Scorer:
+        def __init__(self, name):
+            self.name = name
+
+        async def score_path(self, path, scores):
+            key = (self.name, path.id)
+            started.add(key)
+            if len(started) == 4:
+                all_started.set()
+            await all_started.wait()
+            finished.add(key)
+            return 1.0
+
+    class Decider:
+        async def decide(self, query, candidates, *, count):
+            assert len(finished) == 4
+            return DecisionSelection((candidates.items[0].id,))
+
+    config = _config()
+    config["path_scorers"] = [
+        {"name": name, "type": "custom", "binding": name, "input": "dense_nodes"}
+        for name in ("first", "second")
+    ]
+    config["path_fusions"] = [
+        {"name": "combined", "type": "weighted_rrf", "inputs": ["first", "second"]}
+    ]
+    config["deciders"] = [
+        {"name": "best", "type": "llm", "binding": "llm", "input": "combined"}
+    ]
+    config["outputs"] = {"primary": "best"}
+    preprocessor = SpyEmbeddingPreprocessor()
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": preprocessor},
+            path_scorers={name: Scorer(name) for name in ("first", "second")},
+            deciders={"llm": Decider()},
+        ),
+    )
+
+    result = await asyncio.wait_for(pipeline.classify("query"), timeout=2)
+
+    assert result.outputs["primary"].status == "selected"
+    assert preprocessor.query_calls == 1
+
+
+async def test_routers_and_deciders_overlap_and_shared_results_are_reused(task_factory):
+    routes_started = set()
+    decisions_started = set()
+    all_routes = asyncio.Event()
+    all_decisions = asyncio.Event()
+
+    class Router:
+        def __init__(self, name):
+            self.name = name
+            self.calls = 0
+
+        async def route(self, query, candidates, *, parameters):
+            self.calls += 1
+            routes_started.add(self.name)
+            if len(routes_started) == 2:
+                all_routes.set()
+            await all_routes.wait()
+            return self.name
+
+    class Decider:
+        def __init__(self, name):
+            self.name = name
+            self.calls = 0
+
+        async def decide(self, query, candidates, *, count):
+            self.calls += 1
+            decisions_started.add(self.name)
+            if len(decisions_started) == 2:
+                all_decisions.set()
+            await all_decisions.wait()
+            return DecisionSelection((candidates.items[0].id,))
+
+    config = _config()
+    config["deciders"] = [
+        {"name": name, "type": "llm", "binding": name, "input": "mean_paths"}
+        for name in ("first", "second")
+    ]
+    config["routers"] = [
+        {"name": name + "_router", "binding": name, "deciders": [name]}
+        for name in ("first", "second")
+    ]
+    config["outputs"] = {
+        "first": "first_router",
+        "second": "second_router",
+        "duplicate": "first_router",
+        "direct": "first",
+    }
+    routers = {name: Router(name) for name in ("first", "second")}
+    deciders = {name: Decider(name) for name in ("first", "second")}
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            routers=routers,
+            deciders=deciders,
+        ),
+    )
+
+    result = await asyncio.wait_for(pipeline.classify("query"), timeout=2)
+
+    assert all(
+        binding.calls == 1 for binding in (*routers.values(), *deciders.values())
+    )
+    assert result.outputs["first"] is result.outputs["duplicate"]
+    assert result.outputs["first"] is result.outputs["direct"]
+
+
+@pytest.mark.parametrize("cancel_caller", [False, True])
+async def test_tree_drains_custom_path_tasks_on_failure_or_cancellation(
+    cancel_caller,
+    task_factory,
+):
+    started = asyncio.Event()
+    stopped = asyncio.Event()
+
+    class Scorer:
+        async def score_path(self, path, scores):
+            if path.node_ids[-1] == "a":
+                started.set()
+                try:
+                    await asyncio.Event().wait()
+                finally:
+                    stopped.set()
+            await started.wait()
+            if not cancel_caller:
+                raise ValueError("scorer failed")
+            return 1.0
+
+    config = _config()
+    config["path_scorers"][0].update(type="custom", binding="custom")
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            path_scorers={"custom": Scorer()},
+        ),
+    )
+    caller = asyncio.create_task(pipeline.classify("query"))
+    await asyncio.wait_for(started.wait(), timeout=2)
+    if cancel_caller:
+        caller.cancel()
+    error = asyncio.CancelledError if cancel_caller else ValueError
+    with pytest.raises(error):
+        await asyncio.wait_for(caller, timeout=2)
+    assert stopped.is_set()
+
+
+@pytest.mark.parametrize(
+    ("group", "method"),
+    [
+        ("preprocessors", "prepare_query"),
+        ("preprocessors", "prepare_documents"),
+        ("path_scorers", "score_path"),
+        ("deciders", "decide"),
+        ("routers", "route"),
+    ],
+)
+async def test_build_requires_async_binding_methods(group, method):
+    class InvalidBinding(SpyEmbeddingPreprocessor):
+        pass
+
+    component = InvalidBinding()
+    setattr(component, method, lambda *args, **kwargs: pytest.fail("binding executed"))
+    config = _config()
+    bindings = {"preprocessors": {"embedding": SpyEmbeddingPreprocessor()}}
+    if group == "preprocessors":
+        bindings[group]["embedding"] = component
+    elif group == "path_scorers":
+        config["path_scorers"][0].update(type="custom", binding="invalid")
+        bindings[group] = {"invalid": component}
+    elif group == "deciders":
+        config["deciders"][0].update(type="llm", binding="invalid")
+        bindings[group] = {"invalid": component}
+    else:
+        config["routers"] = [
+            {"name": "gate", "binding": "invalid", "deciders": ["best"]}
+        ]
+        config["outputs"]["primary"] = "gate"
+        bindings[group] = {"invalid": component}
+
+    with pytest.raises(BuildError, match=f"async {method}"):
+        await TreeClassificationPipeline.build(
+            taxonomy=_taxonomy(with_embeddings=method != "prepare_documents"),
+            config=config,
+            bindings=ComponentBindings(**bindings),
+        )
+
+
+async def test_output_subset_skips_unneeded_branch_and_router_skips_unchosen_decider():
+    class UnusedScorer:
+        async def score_path(self, path, scores):
+            pytest.fail("unrequested scoring branch executed")
+
+    class UnchosenDecider:
+        async def decide(self, query, candidates, *, count):
+            pytest.fail("unchosen decider executed")
+
+    config = _config()
+    config["path_scorers"].append(
+        {
+            "name": "other_paths",
+            "type": "custom",
+            "binding": "other",
+            "input": "dense_nodes",
+        }
+    )
+    config["deciders"].extend(
+        [
+            {"name": "other", "type": "top_one", "input": "other_paths"},
+            {
+                "name": "unchosen",
+                "type": "llm",
+                "binding": "llm",
+                "input": "mean_paths",
+            },
+        ]
+    )
+    config["routers"] = [
+        {"name": "gate", "binding": "gate", "deciders": ["best", "unchosen"]}
+    ]
+    config["outputs"].update(primary="gate", other="other")
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": SpyEmbeddingPreprocessor()},
+            path_scorers={"other": UnusedScorer()},
+            routers={"gate": FakeRouter("best")},
+            deciders={"llm": UnchosenDecider()},
+        ),
+    )
+
+    result = await asyncio.wait_for(
+        pipeline.classify("query", outputs=["primary"]), timeout=2
+    )
+
+    assert tuple(result.outputs) == ("primary",)
+    assert result.outputs["primary"].name == "best"
 
 
 def _branching_taxonomy() -> Taxonomy:
@@ -369,7 +681,7 @@ class FakeRouter:
         self.candidate_ids: dict[str, tuple[str, ...]] = {}
         self.parameters = None
 
-    def route(self, query, candidates, *, parameters):
+    async def route(self, query, candidates, *, parameters):
         self.calls += 1
         self.candidate_ids = {
             decider: ranking.ids for decider, ranking in candidates.items()
@@ -383,12 +695,14 @@ class SpyTokenizer:
         self.tokenizer = TextTokenizer()
         self.document_inputs: list[tuple[str, ...]] = []
 
-    def prepare_query(self, text: str) -> tuple[str, ...]:
-        return self.tokenizer.prepare_query(text)
+    async def prepare_query(self, text: str) -> tuple[str, ...]:
+        return await self.tokenizer.prepare_query(text)
 
-    def prepare_documents(self, texts: tuple[str, ...]) -> tuple[tuple[str, ...], ...]:
+    async def prepare_documents(
+        self, texts: tuple[str, ...]
+    ) -> tuple[tuple[str, ...], ...]:
         self.document_inputs.append(texts)
-        return self.tokenizer.prepare_documents(texts)
+        return await self.tokenizer.prepare_documents(texts)
 
 
 @pytest.mark.asyncio

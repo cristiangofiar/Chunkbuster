@@ -14,7 +14,7 @@ def _freeze(values: Mapping[str, Any]) -> Mapping[str, Any]:
 
 @dataclass(frozen=True, slots=True)
 class ComponentBindings:
-    """Concrete external objects, keyed by the config's ``binding`` value."""
+    """Async external components, keyed by the config's ``binding`` value."""
 
     preprocessors: Mapping[str, Any] = field(default_factory=dict)
     retrievers: Mapping[str, Any] = field(default_factory=dict)

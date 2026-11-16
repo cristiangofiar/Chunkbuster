@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from asyncio import gather
 from collections.abc import Iterable
+from inspect import iscoroutinefunction
 from types import MappingProxyType
 
-from ..core._async import resolve
+from ..core._async import task_scope
 from ..core.config import ConfigInput, by_name, load_config
 from ..core.contracts import ComponentBindings
 from ..core.dag import CompiledDAG, compile_dag
@@ -22,7 +24,7 @@ from .models import Chunk, RetrievalOutput, RetrievalPipelineResult
 
 
 class RetrievalPipeline:
-    """Sequential DAG of bound retrievers and built-in ranking fusions."""
+    """Concurrent DAG of bound retrievers and built-in ranking fusions."""
 
     def __init__(
         self,
@@ -80,10 +82,10 @@ class RetrievalPipeline:
                 raise BuildError(
                     f"missing preprocessor binding {spec.binding!r}"
                 ) from exc
-            if not callable(getattr(component, "prepare_query", None)):
+            if not iscoroutinefunction(getattr(component, "prepare_query", None)):
                 raise BuildError(
                     f"preprocessor binding {spec.binding!r} must define "
-                    "prepare_query(text)"
+                    "async prepare_query(text)"
                 )
             preprocessors[spec.name] = component
 
@@ -94,9 +96,9 @@ class RetrievalPipeline:
             except KeyError as exc:
                 raise BuildError(f"missing retriever binding {spec.binding!r}") from exc
             method = "retrieve_candidates" if spec.input is not None else "retrieve"
-            if not callable(getattr(component, method, None)):
+            if not iscoroutinefunction(getattr(component, method, None)):
                 raise BuildError(
-                    f"retriever binding {spec.binding!r} must define {method}()"
+                    f"retriever binding {spec.binding!r} must define async {method}()"
                 )
             retrievers[spec.name] = component
 
@@ -124,25 +126,30 @@ class RetrievalPipeline:
         outputs: Iterable[str] | None = None,
     ) -> RetrievalPipelineResult:
         query = as_query(query)
-        prepared: dict[str, object] = {}
         rankings: dict[str, Ranking[Chunk]] = {}
 
-        for name in self._dag.order:
+        async def run_node(name):
+            await gather(*(nodes[source] for source in self._dag.dependencies[name]))
             if name in self._retriever_specs:
                 spec = self._retriever_specs[name]
-                if spec.preprocessor not in prepared:
-                    preprocessor = self._preprocessors[spec.preprocessor]
-                    prepared[spec.preprocessor] = await resolve(
-                        preprocessor.prepare_query(query.text)
-                    )
                 rankings[name] = await self._run_retriever(
                     spec,
-                    prepared[spec.preprocessor],
+                    await prepared[spec.preprocessor],
                     rankings,
                 )
             else:
                 spec = self._fusion_specs[name]
                 rankings[name] = self._run_fusion(spec, rankings)
+
+        async with task_scope() as start:
+            prepared = {
+                name: start(component.prepare_query(query.text))
+                for name, component in self._preprocessors.items()
+            }
+            nodes = {}
+            for name in self._dag.order:
+                nodes[name] = start(run_node(name))
+            await gather(*nodes.values())
 
         requested = tuple(self._config.outputs) if outputs is None else tuple(outputs)
         if len(requested) != len(set(requested)):
@@ -167,9 +174,7 @@ class RetrievalPipeline:
     ) -> Ranking[Chunk]:
         component = self._retrievers[spec.name]
         if spec.input is None:
-            raw = await resolve(
-                component.retrieve(query_representation, top_k=spec.top_k)
-            )
+            raw = await component.retrieve(query_representation, top_k=spec.top_k)
             ranking = require_ranking(raw, component=spec.name)
             return Ranking(
                 ranking.items[: spec.top_k],
@@ -178,12 +183,10 @@ class RetrievalPipeline:
             )
 
         candidates = rankings[spec.input]
-        raw = await resolve(
-            component.retrieve_candidates(
-                query_representation,
-                candidates,
-                top_k=spec.top_k,
-            )
+        raw = await component.retrieve_candidates(
+            query_representation,
+            candidates,
+            top_k=spec.top_k,
         )
         ranking = require_ranking(raw, component=spec.name)
         return require_subset(ranking, candidates, component=spec.name).top(spec.top_k)

@@ -26,7 +26,7 @@ query -> preprocessors -> source/candidate retrievers -> optional fusion -> outp
 | Tree decisions | Routers multi-ranking, `top_one`, `top_k`, `threshold`, `llm` y outputs |
 | Retrieval | Retrievers, DAG y fusiones `weighted_rrf`, `weighted_sum` o `comb_mnz` |
 | Configuración | YAML, JSON, mapping o modelo Pydantic |
-| Adapters | Objetos Python explícitos, síncronos o asíncronos |
+| Adapters | Objetos Python explícitos con métodos asíncronos |
 
 ## Estructura real
 
@@ -111,8 +111,10 @@ routers
 
 La clave del mapping coincide con `binding` en la configuración. El objeto no
 repite su nombre y no debe heredar de una clase base: basta con implementar el
-método esperado. `_async.resolve()` permite implementaciones sync o async sin
-duplicar la API pública.
+método esperado con `async def`. Los pipelines llaman directamente con `await`
+y `build()` valida este contrato. Los bindings compartidos deben admitir
+llamadas concurrentes. El trabajo CPU de los scorers y fusiones incorporados
+sigue ejecutándose en el event loop; no se reparte entre procesos.
 
 ### Ranking
 
@@ -157,6 +159,12 @@ Retrieval también acepta `rrf` como alias de `weighted_rrf`.
 
 No ejecuta negocio ni interpreta tipos. Retrieval y Tree lo usan para validar
 orden, referencias, ciclos y ramas de scoring inalcanzables.
+
+Durante una query se crea una tarea por nodo requerido, que espera únicamente a
+sus dependencias. No hay barreras entre niveles: una rama avanza tan pronto como
+sus inputs estén disponibles, aunque otra rama siga trabajando. Una fusión espera
+todos sus inputs. `_async.task_scope()` cancela y recoge las tareas pendientes
+si falla la ejecución o se cancela el caller, manteniendo la excepción original.
 
 ## TreeClassificationPipeline
 
@@ -216,6 +224,13 @@ Para cada query se ejecuta la clausura requerida por los outputs pedidos:
 5. cada output solicitado resuelve su router opcional;
 6. se ejecuta el decider terminal elegido.
 
+Estos pasos se coordinan por dependencias, sin esperar a todas las ramas de una
+etapa. Cada router espera los rankings de sus deciders permitidos; cada decider
+espera solo su ranking y, si procede, la elección del router. Los outputs
+independientes se resuelven concurrentemente y conservan el orden solicitado.
+Los preprocessors, routers y deciders compartidos se ejecutan una vez por query.
+Las llamadas a `score_path()` de un binding custom también son concurrentes.
+
 `top_one` selecciona como máximo uno. `top_k` selecciona hasta `count`.
 `threshold` selecciona todos los candidatos con `score >= min_score`, con un
 `count` opcional. `llm` llama a `decide(query, ranking, count=...)` sobre todos
@@ -236,7 +251,7 @@ Admite `root`, niveles posteriores a la raíz mediante `level_n`, `mean`, `leaf`
 de `ComponentBindings.path_scorers` con
 `score_path(path, node_scores)`. Los deciders LLM se resuelven desde
 `ComponentBindings.deciders`; los routers, desde `ComponentBindings.routers`.
-Ambos pueden ser síncronos o asíncronos.
+Ambos deben implementar métodos asíncronos.
 
 `classify(query, outputs=...)` ejecuta la clausura de dependencias necesaria
 para el subconjunto de outputs solicitado.
@@ -282,16 +297,17 @@ retriever cuyo `input` referencia otro ranking.
 referencias, outputs, nodos muertos y ciclos. No consulta stores ni ejecuta
 retrievers.
 
-En `retrieve()` los nodos se recorren secuencialmente en orden topológico. Cada
-preprocessor se memoiza por nombre y se ejecuta como máximo una vez por query,
-aunque lo compartan varios retrievers. Los rankings intermedios viven solo en
-esa llamada.
+En `retrieve()` los nodos se ejecutan concurrentemente según sus dependencias.
+Cada preprocessor se memoiza mediante una tarea por nombre y se ejecuta como
+máximo una vez por query, aunque lo compartan varios retrievers. Un retriever
+restringido espera su ranking de entrada y su preprocessor; una fusión espera
+todos sus rankings. Los rankings intermedios viven solo en esa llamada.
 
 Cada output publica `terminal_node`, `ranking` y un status derivado
 `completed|empty`. `retrieve(query, outputs=...)` selecciona qué outputs
 devuelve, aunque el DAG configurado se ejecuta completo.
 
-La ejecución es secuencial y cualquier error aborta la llamada completa.
+Cualquier error aborta la llamada completa y cancela las tareas pendientes.
 
 ## Fronteras externas
 
