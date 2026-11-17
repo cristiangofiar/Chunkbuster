@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -26,7 +27,7 @@ class SpyEmbeddingPreprocessor:
         self.document_calls = 0
         self.document_inputs: list[tuple[str, ...]] = []
 
-    async def prepare_query(self, text: str) -> tuple[float, float]:
+    async def prepare_query(self, query: Query) -> tuple[float, float]:
         self.query_calls += 1
         return (1.0, 0.0)
 
@@ -118,6 +119,84 @@ def _bindings(preprocessor: SpyEmbeddingPreprocessor) -> ComponentBindings:
     return ComponentBindings(preprocessors={"embedding": preprocessor})
 
 
+async def test_query_context_reaches_tree_bindings_without_crossing_requests(
+    task_factory,
+):
+    queries = {
+        "first": Query("first", metadata={"market": "EC"}),
+        "second": Query("second", metadata=SimpleNamespace(market="PE")),
+    }
+    seen = {}
+
+    def check(query, stage):
+        assert isinstance(query, Query)
+        if query.text == "plain":
+            queries.setdefault("plain", query)
+        assert query is queries[query.text]
+        seen.setdefault((query.text, stage), []).append(query)
+        market = (
+            query.metadata.get("market", "default")
+            if isinstance(query.metadata, dict)
+            else query.metadata.market
+        )
+        return 1.0 if market == "EC" else 2.0
+
+    class Preprocessor:
+        async def prepare_query(self, query):
+            check(query, "prepare")
+            await asyncio.sleep(0)
+            return (1.0, 0.0)
+
+    class Scorer:
+        async def score_path(self, query, path, scores):
+            assert len(scores) == len(path.node_ids)
+            await asyncio.sleep(0)
+            return check(query, "score")
+
+    class Router:
+        async def route(self, query, candidates, *, parameters):
+            score = check(query, "router")
+            assert all(item.score == score for item in candidates["best"])
+            return "best"
+
+    class Decider:
+        async def decide(self, query, candidates, *, count):
+            score = check(query, "decider")
+            assert all(item.score == score for item in candidates)
+            return DecisionSelection((candidates.items[0].id,))
+
+    config = _config()
+    config["path_scorers"][0].update(type="custom", binding="scorer")
+    config["deciders"][0].update(type="llm", binding="llm")
+    config["routers"] = [{"name": "gate", "binding": "router", "deciders": ["best"]}]
+    config["outputs"]["primary"] = "gate"
+    pipeline = await TreeClassificationPipeline.build(
+        taxonomy=_taxonomy(with_embeddings=True),
+        config=config,
+        bindings=ComponentBindings(
+            preprocessors={"embedding": Preprocessor()},
+            path_scorers={"scorer": Scorer()},
+            routers={"router": Router()},
+            deciders={"llm": Decider()},
+        ),
+    )
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            pipeline.classify(queries["first"]),
+            pipeline.classify(queries["second"]),
+            pipeline.classify("plain"),
+        ),
+        timeout=2,
+    )
+
+    assert all(result.outputs["primary"].status == "selected" for result in results)
+    assert len(seen) == 12
+    assert all(
+        len(calls) == (2 if stage == "score" else 1)
+        for (_, stage), calls in seen.items()
+    )
+
+
 async def test_tree_branch_can_decide_while_independent_preprocessor_is_blocked(
     task_factory,
 ):
@@ -125,7 +204,7 @@ async def test_tree_branch_can_decide_while_independent_preprocessor_is_blocked(
     semantic_decided = asyncio.Event()
 
     class Embedding:
-        async def prepare_query(self, text):
+        async def prepare_query(self, query):
             await lexical_started.wait()
             return (1.0, 0.0)
 
@@ -133,7 +212,7 @@ async def test_tree_branch_can_decide_while_independent_preprocessor_is_blocked(
         async def prepare_documents(self, texts):
             return tuple(("a",) for _ in texts)
 
-        async def prepare_query(self, text):
+        async def prepare_query(self, query):
             lexical_started.set()
             await semantic_decided.wait()
             return ("a",)
@@ -184,7 +263,7 @@ async def test_custom_path_calls_overlap_and_fusion_waits_for_all_branches(
         def __init__(self, name):
             self.name = name
 
-        async def score_path(self, path, scores):
+        async def score_path(self, query, path, scores):
             key = (self.name, path.id)
             started.add(key)
             if len(started) == 4:
@@ -304,7 +383,7 @@ async def test_tree_drains_custom_path_tasks_on_failure_or_cancellation(
     stopped = asyncio.Event()
 
     class Scorer:
-        async def score_path(self, path, scores):
+        async def score_path(self, query, path, scores):
             if path.node_ids[-1] == "a":
                 started.set()
                 try:
@@ -379,7 +458,7 @@ async def test_build_requires_async_binding_methods(group, method):
 
 async def test_output_subset_skips_unneeded_branch_and_router_skips_unchosen_decider():
     class UnusedScorer:
-        async def score_path(self, path, scores):
+        async def score_path(self, query, path, scores):
             pytest.fail("unrequested scoring branch executed")
 
     class UnchosenDecider:
@@ -616,7 +695,7 @@ class LeafPathScorer:
     def __init__(self) -> None:
         self.calls: list[tuple[tuple[str, ...], tuple[float, ...]]] = []
 
-    async def score_path(self, path, node_scores):
+    async def score_path(self, query, path, node_scores):
         self.calls.append((path.node_ids, node_scores))
         return node_scores[-1]
 
@@ -695,8 +774,8 @@ class SpyTokenizer:
         self.tokenizer = TextTokenizer()
         self.document_inputs: list[tuple[str, ...]] = []
 
-    async def prepare_query(self, text: str) -> tuple[str, ...]:
-        return await self.tokenizer.prepare_query(text)
+    async def prepare_query(self, query: Query) -> tuple[str, ...]:
+        return await self.tokenizer.prepare_query(query)
 
     async def prepare_documents(
         self, texts: tuple[str, ...]

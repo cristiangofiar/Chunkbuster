@@ -121,15 +121,15 @@ class RerankerTokenizerAdapter:
     def __init__(self, tokenizer):
         self.tokenizer = tokenizer
 
-    async def prepare_query(self, text):
-        return self.tokenizer.encode(text)
+    async def prepare_query(self, query):
+        return self.tokenizer.encode(query.text)
 
 
 class CrossEncoderRerankerAdapter:
     def __init__(self, model):
         self.model = model
 
-    async def retrieve_candidates(self, query_tokens, candidates, *, top_k):
+    async def retrieve_candidates(self, query, query_tokens, candidates, *, top_k):
         scores = await self.model.score(
             query_tokens,
             [item.item.text for item in candidates],
@@ -283,7 +283,7 @@ class LocalVectorSearchAdapter:
     def __init__(self, index):
         self.index = index
 
-    async def retrieve(self, vector, *, top_k):
+    async def retrieve(self, query, vector, *, top_k):
         return self.index.search(vector, top_k=top_k)
 
 
@@ -291,7 +291,7 @@ class LLMChunkSelectorAdapter:
     def __init__(self, llm):
         self.llm = llm
 
-    async def retrieve_candidates(self, query_tokens, candidates, *, top_k):
+    async def retrieve_candidates(self, query, query_tokens, candidates, *, top_k):
         chosen_ids = await self.llm.choose_chunks(
             query_tokens=query_tokens,
             candidates=[item.item for item in candidates],
@@ -480,7 +480,7 @@ class BM25SearchAdapter:
     def __init__(self, index):
         self.index = index
 
-    async def retrieve(self, tokens, *, top_k):
+    async def retrieve(self, query, tokens, *, top_k):
         return self.index.search(tokens, top_k=top_k)
 
 
@@ -506,7 +506,7 @@ bindings = ComponentBindings(
 ```
 
 `BM25SearchAdapter` es un retriever fuente: implementa
-`retrieve(tokens, *, top_k)`. Las fusiones son internas y no necesitan binding.
+`retrieve(query, tokens, *, top_k)`. Las fusiones son internas y no necesitan binding.
 
 # TreeClassificationPipeline
 
@@ -1059,7 +1059,7 @@ from chunkbuster import ComponentBindings, DecisionRoute, DecisionSelection, Tex
 
 
 class BusinessPathScorerAdapter:
-    async def score_path(self, path, node_scores):
+    async def score_path(self, query, path, node_scores):
         base = sum(node_scores[node_id] for node_id in path.node_ids)
         priority = float(path.nodes[-1].metadata.get("priority", 0.0))
         return base + priority

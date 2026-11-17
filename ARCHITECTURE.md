@@ -72,8 +72,8 @@ entre sí. El paquete no importa SDKs de proveedores.
 2. Código, clientes, modelos y secretos se inyectan; nunca se deserializan.
 3. Los datos estables se resuelven durante `build()` y cada query usa estado
    privado.
-4. Los objetos de dominio son dataclasses frozen; metadata y resultados
-   públicos exponen mappings de solo lectura.
+4. Los objetos de dominio son dataclasses frozen; resultados públicos exponen
+   mappings de solo lectura. `Query.metadata` conserva el valor del caller.
 5. Un `Ranking` tiene IDs únicos y orden determinista.
 6. Una etapa restringida no puede inventar identidades fuera de su input.
 7. La configuración se valida antes de ejecutar queries siempre que la
@@ -86,6 +86,16 @@ entre sí. El paquete no importa SDKs de proveedores.
 
 `Query` contiene texto, ID opcional y metadata. Tanto `classify()` como
 `retrieve()` aceptan también un `str`, que se normaliza a `Query`.
+
+Cada ejecución propaga la misma instancia de `Query` a sus bindings. Los
+preprocessors leen `query.text` para preparar la representación; los retrievers
+reciben tanto el `Query` original como esa representación. Los path scorers
+custom, routers y deciders LLM también reciben ese mismo `Query`.
+`Query.metadata` admite diccionarios u objetos y se conserva por referencia:
+`query.metadata["market"]` para un dict o `query.metadata.market` para un objeto.
+Los bindings deben tratarla como contexto de entrada y no mutarla durante la
+ejecución concurrente. `prepare_documents(texts)` sigue recibiendo textos porque
+se ejecuta al construir la taxonomía, fuera de las queries.
 
 `load_config()` carga:
 
@@ -207,7 +217,7 @@ snapshot nuevo. Una cobertura parcial falla para evitar mezclar modelos o
 versiones. Si hay tokenizer, solo genera los `tokens` ausentes. El `Taxonomy`
 entregado por el caller nunca se muta.
 
-El preprocessor siempre debe implementar `prepare_query(text)`. El usuario es
+El preprocessor siempre debe implementar `prepare_query(query)`. El usuario es
 responsable de inyectar el mismo modelo, versión, dimensión y normalización que
 produjo los embeddings de los nodos; la librería solo puede comprobar sus
 propiedades numéricas.
@@ -249,7 +259,7 @@ Los `terms` de un path scorer `weighted_sum` son un mapping de peso por nombre.
 Admite `root`, niveles posteriores a la raíz mediante `level_n`, `mean`, `leaf`,
 `lowest` y `highest`; la suma no normaliza pesos. `custom` resuelve un binding
 de `ComponentBindings.path_scorers` con
-`score_path(path, node_scores)`. Los deciders LLM se resuelven desde
+`score_path(query, path, node_scores)`. Los deciders LLM se resuelven desde
 `ComponentBindings.deciders`; los routers, desde `ComponentBindings.routers`.
 Ambos deben implementar métodos asíncronos.
 
@@ -267,13 +277,13 @@ un preprocessor y un binding explícitos.
 Un retriever sin `input` es fuente:
 
 ```text
-retrieve(query_representation, *, top_k) -> Ranking[Chunk]
+retrieve(query, query_representation, *, top_k) -> Ranking[Chunk]
 ```
 
 Un retriever con `input` es restringido:
 
 ```text
-retrieve_candidates(query_representation, candidates, *, top_k)
+retrieve_candidates(query, query_representation, candidates, *, top_k)
     -> Ranking[Chunk]
 ```
 

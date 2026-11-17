@@ -228,7 +228,7 @@ class TreeClassificationPipeline:
             if not iscoroutinefunction(getattr(component, "prepare_query", None)):
                 raise BuildError(
                     f"preprocessor binding {spec.binding!r} must define "
-                    "async prepare_query(text)"
+                    "async prepare_query(query)"
                 )
             bound_preprocessors[spec.name] = component
 
@@ -244,7 +244,8 @@ class TreeClassificationPipeline:
                 ) from exc
             if not iscoroutinefunction(getattr(component, "score_path", None)):
                 raise BuildError(
-                    "custom path scorer must define async score_path(path, scores)"
+                    "custom path scorer must define async "
+                    "score_path(query, path, scores)"
                 )
             bound_path_scorers[spec.name] = component
 
@@ -408,7 +409,7 @@ class TreeClassificationPipeline:
             await gather(*(nodes[source] for source in self._dag.dependencies[name]))
             if name in self._preprocessor_specs:
                 preprocessor = self._preprocessor_specs[name]
-                raw = await self._preprocessors[name].prepare_query(query.text)
+                raw = await self._preprocessors[name].prepare_query(query)
                 prepared[name] = (
                     validate_vector(
                         raw,
@@ -467,7 +468,7 @@ class TreeClassificationPipeline:
 
                     async def score_path(path):
                         raw = await self._path_scorers[name].score_path(
-                            path, values_for(path)
+                            query, path, values_for(path)
                         )
                         return validate_path_score(raw, path=path)
 

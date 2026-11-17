@@ -85,7 +85,7 @@ class RetrievalPipeline:
             if not iscoroutinefunction(getattr(component, "prepare_query", None)):
                 raise BuildError(
                     f"preprocessor binding {spec.binding!r} must define "
-                    "async prepare_query(text)"
+                    "async prepare_query(query)"
                 )
             preprocessors[spec.name] = component
 
@@ -134,6 +134,7 @@ class RetrievalPipeline:
                 spec = self._retriever_specs[name]
                 rankings[name] = await self._run_retriever(
                     spec,
+                    query,
                     await prepared[spec.preprocessor],
                     rankings,
                 )
@@ -143,7 +144,7 @@ class RetrievalPipeline:
 
         async with task_scope() as start:
             prepared = {
-                name: start(component.prepare_query(query.text))
+                name: start(component.prepare_query(query))
                 for name, component in self._preprocessors.items()
             }
             nodes = {}
@@ -169,12 +170,15 @@ class RetrievalPipeline:
     async def _run_retriever(
         self,
         spec: RetrieverConfig,
+        query: Query,
         query_representation: object,
         rankings: dict[str, Ranking[Chunk]],
     ) -> Ranking[Chunk]:
         component = self._retrievers[spec.name]
         if spec.input is None:
-            raw = await component.retrieve(query_representation, top_k=spec.top_k)
+            raw = await component.retrieve(
+                query, query_representation, top_k=spec.top_k
+            )
             ranking = require_ranking(raw, component=spec.name)
             return Ranking(
                 ranking.items[: spec.top_k],
@@ -184,6 +188,7 @@ class RetrievalPipeline:
 
         candidates = rankings[spec.input]
         raw = await component.retrieve_candidates(
+            query,
             query_representation,
             candidates,
             top_k=spec.top_k,

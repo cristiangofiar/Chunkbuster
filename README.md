@@ -159,15 +159,15 @@ class QueryEmbeddingAdapter:
     def __init__(self, model):
         self.model = model
 
-    async def prepare_query(self, text):
-        return await self.model.embed(text)
+    async def prepare_query(self, query):
+        return await self.model.embed(query.text)
 
 
 class CatalogVectorStoreAdapter:
     def __init__(self, store):
         self.store = store
 
-    async def retrieve(self, vector, *, top_k):
+    async def retrieve(self, query, vector, *, top_k):
         hits = await self.store.search(vector, limit=top_k)
         return Ranking(
             tuple(
@@ -310,8 +310,8 @@ class TaxonomyEmbeddingAdapter:
     async def prepare_documents(self, texts):
         return await self.model.embed_many(texts, dimensions=3)
 
-    async def prepare_query(self, text):
-        return await self.model.embed(text, dimensions=3)
+    async def prepare_query(self, query):
+        return await self.model.embed(query.text, dimensions=3)
 
 
 taxonomy = Taxonomy(
@@ -383,15 +383,34 @@ y stop words.
 
 ## Contratos de bindings
 
+Los bindings de ejecución reciben el mismo `Query` pasado al pipeline. Si la
+entrada es un `str`, se convierte una vez en `Query`. Los preprocessors usan
+`query.text`; los retrievers reciben además la representación preparada.
+`metadata` conserva el diccionario u objeto recibido, sin copiarlo ni convertirlo:
+
+```python
+from types import SimpleNamespace
+from chunkbuster import Query
+
+query = Query("Auriculares", metadata=SimpleNamespace(market="EC"))
+result = await pipeline.retrieve(query)
+# En el binding: query.metadata.market == "EC"
+```
+
+Con un diccionario, el acceso es `query.metadata["market"]`. Los bindings deben
+tratar la metadata como contexto de entrada, sin mutarla durante la ejecución.
+Este contrato cambia las firmas de preprocessors, retrievers y path scorers
+custom respecto a 0.4.2; sus adapters deben actualizarse a las firmas siguientes.
+
 | Binding | Método requerido | Contrato de salida |
 |---|---|---|
-| Preprocessor de Retrieval | `prepare_query(text)` | Representación que espera el retriever |
-| Preprocessor `embedding` de Tree | `prepare_query(text)` | Vector numérico finito con `dimensions` valores |
-| Preprocessor `tokenizer` de Tree | `prepare_query(text)` | Secuencia de tokens no vacíos |
+| Preprocessor de Retrieval | `prepare_query(query)` | Representación que espera el retriever |
+| Preprocessor `embedding` de Tree | `prepare_query(query)` | Vector numérico finito con `dimensions` valores |
+| Preprocessor `tokenizer` de Tree | `prepare_query(query)` | Secuencia de tokens no vacíos |
 | Document preprocessor de Tree | `prepare_documents(texts)` | Una representación válida por texto cuando deba generarse |
-| Retriever fuente | `retrieve(query, *, top_k)` | `Ranking[Chunk]` |
-| Retriever restringido | `retrieve_candidates(query, candidates, *, top_k)` | `Ranking[Chunk]` con IDs contenidos en `candidates` |
-| Path scorer `custom` | `score_path(path, node_scores)` | Número finito |
+| Retriever fuente | `retrieve(query, representation, *, top_k)` | `Ranking[Chunk]` |
+| Retriever restringido | `retrieve_candidates(query, representation, candidates, *, top_k)` | `Ranking[Chunk]` con IDs contenidos en `candidates` |
+| Path scorer `custom` | `score_path(query, path, node_scores)` | Número finito |
 | Decider `llm` | `decide(query, candidates, *, count)` | `DecisionSelection` con IDs del ranking recibido |
 | Router | `route(query, candidates, *, parameters)` | Nombre permitido de decider o `DecisionRoute` |
 

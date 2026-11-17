@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from chunkbuster import TextTokenizer
+from chunkbuster import Query, TextTokenizer
 
 
 def test_word_tokenizer_supports_case_accents_stop_words_and_min_length() -> None:
@@ -20,5 +20,5 @@ def test_word_tokenizer_supports_case_accents_stop_words_and_min_length() -> Non
 async def test_whitespace_tokenizer_can_preserve_case_and_punctuation() -> None:
     tokenizer = TextTokenizer(mode="whitespace", case_sensitive=True)
 
-    assert await tokenizer.prepare_query("Red, SHOES") == ("Red,", "SHOES")
+    assert await tokenizer.prepare_query(Query("Red, SHOES")) == ("Red,", "SHOES")
     assert await tokenizer.prepare_documents(("A B", "C")) == (("A", "B"), ("C",))

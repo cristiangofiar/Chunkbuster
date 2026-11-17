@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import asyncio
 from copy import deepcopy
+from types import SimpleNamespace
 
 import pytest
 
-from chunkbuster.core import ComponentBindings, RankedItem, Ranking
+from chunkbuster.core import ComponentBindings, Query, RankedItem, Ranking
 from chunkbuster.errors import BuildError, ConfigurationError, InvalidModelOutputError
 from chunkbuster.retrieval import Chunk, RetrievalPipeline
 
@@ -25,23 +26,26 @@ class CountingPreprocessor:
     def __init__(self) -> None:
         self.calls = 0
 
-    async def prepare_query(self, text: str) -> str:
+    async def prepare_query(self, query: Query) -> str:
         self.calls += 1
-        return text.casefold()
+        return query.text.casefold()
 
 
 class SourceRetriever:
     def __init__(self, ranking: Ranking[Chunk]) -> None:
         self.ranking = ranking
 
-    async def retrieve(self, query: str, *, top_k: int) -> Ranking[Chunk]:
+    async def retrieve(
+        self, query: Query, representation, *, top_k: int
+    ) -> Ranking[Chunk]:
         return self.ranking
 
 
 class CandidateRetriever:
     async def retrieve_candidates(
         self,
-        query: str,
+        query: Query,
+        representation,
         candidates: Ranking[Chunk],
         *,
         top_k: int,
@@ -87,6 +91,81 @@ BASE_CONFIG = {
 }
 
 
+async def test_query_context_reaches_all_bindings_without_crossing_requests(
+    task_factory,
+):
+    queries = {
+        "first": Query("first", id="1", metadata={"market": "EC"}),
+        "second": Query("second", id="2", metadata=SimpleNamespace(market="PE")),
+    }
+    seen = {}
+
+    def market_for(query, stage):
+        assert isinstance(query, Query)
+        if query.text == "plain":
+            queries.setdefault("plain", query)
+        assert query is queries[query.text]
+        seen.setdefault((query.text, stage), []).append(query)
+        metadata = query.metadata
+        return (
+            metadata.get("market", "default")
+            if isinstance(metadata, dict)
+            else metadata.market
+        )
+
+    class Preprocessor:
+        async def prepare_query(self, query):
+            market_for(query, "prepare")
+            await asyncio.sleep(0)
+            return query.text.upper()
+
+    class Source:
+        def __init__(self, stage):
+            self.stage = stage
+
+        async def retrieve(self, query, representation, *, top_k):
+            assert representation == query.text.upper()
+            await asyncio.sleep(0)
+            return _ranking(market_for(query, self.stage))
+
+    class Candidate:
+        async def retrieve_candidates(
+            self, query, representation, candidates, *, top_k
+        ):
+            assert representation == query.text.upper()
+            assert candidates.ids == (market_for(query, "candidate"),)
+            return candidates
+
+    pipeline = await RetrievalPipeline.build(
+        config=BASE_CONFIG,
+        bindings=ComponentBindings(
+            preprocessors={"shared": Preprocessor()},
+            retrievers={
+                "source_a": Source("a"),
+                "source_b": Source("b"),
+                "candidate": Candidate(),
+            },
+        ),
+    )
+    results = await asyncio.wait_for(
+        asyncio.gather(
+            pipeline.retrieve(queries["first"]),
+            pipeline.retrieve(queries["second"]),
+            pipeline.retrieve("plain"),
+        ),
+        timeout=2,
+    )
+
+    assert [result.query_id for result in results] == ["1", "2", None]
+    assert [result.outputs["primary"].ranking.ids for result in results] == [
+        ("EC",),
+        ("PE",),
+        ("default",),
+    ]
+    assert len(seen) == 12
+    assert all(len(calls) == 1 for calls in seen.values())
+
+
 async def test_independent_retrievers_overlap_and_cascade_does_not_wait_for_sibling(
     task_factory,
 ):
@@ -95,18 +174,20 @@ async def test_independent_retrievers_overlap_and_cascade_does_not_wait_for_sibl
     preprocessor = CountingPreprocessor()
 
     class FirstSource:
-        async def retrieve(self, query, *, top_k):
+        async def retrieve(self, query, representation, *, top_k):
             await sibling_started.wait()
             return _ranking("a", "b")
 
     class SlowSource:
-        async def retrieve(self, query, *, top_k):
+        async def retrieve(self, query, representation, *, top_k):
             sibling_started.set()
             await cascade_finished.wait()
             return _ranking("b", "c")
 
     class Cascade:
-        async def retrieve_candidates(self, query, candidates, *, top_k):
+        async def retrieve_candidates(
+            self, query, representation, candidates, *, top_k
+        ):
             assert candidates.ids == ("a", "b")
             cascade_finished.set()
             return _ranking("b")
@@ -138,7 +219,7 @@ async def test_retrieval_cancels_other_branches_on_failure_or_caller_cancellatio
     stopped = asyncio.Event()
 
     class BlockedSource:
-        async def retrieve(self, query, *, top_k):
+        async def retrieve(self, query, representation, *, top_k):
             started.set()
             try:
                 await asyncio.Event().wait()
@@ -146,7 +227,7 @@ async def test_retrieval_cancels_other_branches_on_failure_or_caller_cancellatio
                 stopped.set()
 
     class FailingSource:
-        async def retrieve(self, query, *, top_k):
+        async def retrieve(self, query, representation, *, top_k):
             await started.wait()
             raise ValueError("retriever failed")
 
@@ -289,7 +370,8 @@ async def test_rank_fusion_rejects_score_normalization() -> None:
 class InventingCandidateRetriever:
     async def retrieve_candidates(
         self,
-        query: str,
+        query: Query,
+        representation,
         candidates: Ranking[Chunk],
         *,
         top_k: int,

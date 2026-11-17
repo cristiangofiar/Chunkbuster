@@ -7,6 +7,8 @@ import unicodedata
 from dataclasses import dataclass, field
 from typing import Literal
 
+from .models import Query
+
 Tokenization = Literal["word", "whitespace"]
 
 
@@ -56,8 +58,8 @@ class TextTokenizer:
             if len(token) >= self.min_length and token not in self.stop_words
         )
 
-    async def prepare_query(self, text: str) -> tuple[str, ...]:
-        return self.tokenize(text)
+    async def prepare_query(self, query: Query) -> tuple[str, ...]:
+        return self.tokenize(query.text)
 
     async def prepare_documents(self, texts) -> tuple[tuple[str, ...], ...]:
         return tuple(self.tokenize(text) for text in texts)
