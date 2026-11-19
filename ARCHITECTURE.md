@@ -137,10 +137,10 @@ sigue ejecutándose en el event loop; no se reparte entre procesos.
 - provenance y metadata.
 
 `Ranking[T]` es una tupla ordenada e inmutable. Al construirla se rechazan IDs
-duplicados y se reasignan ranks desde uno. `require_subset()` canonicaliza el
-item contra el input y rechaza IDs inventados. `to_text()` conserva ese orden y
-acepta un formatter por `RankedItem`; por defecto representa solo identidad e
-item, sin añadir score ni rank. Para `TaxonomyPath`, `str(path)` concatena los
+duplicados y se reasignan ranks desde uno. `require_subset()` canonicaliza cada
+item contra sus rankings de entrada y rechaza IDs inventados. `to_text()`
+conserva ese orden y acepta un formatter por `RankedItem`. Por defecto representa
+solo identidad e item, sin añadir score ni rank. Para `TaxonomyPath`, `str(path)` concatena los
 labels raíz-hoja y omite descripciones y metadata.
 
 Las estrategias compartidas son `weighted_rrf`, `weighted_sum` y `comb_mnz`.
@@ -270,54 +270,72 @@ para el subconjunto de outputs solicitado.
 
 ### Grafo de rankings
 
-La configuración declara preprocessors, retrievers, fusiones y outputs. Los
-nombres de retrievers y fusiones comparten namespace. Cada retriever referencia
-un preprocessor y un binding explícitos.
+La configuración declara preprocessors, retrievers, fusiones, routers y outputs.
+Retrievers, fusiones y routers comparten el namespace de rankings. Cada
+retriever referencia un preprocessor y un binding explícitos.
 
-Un retriever sin `input` es fuente:
+Un retriever sin `inputs` es fuente y usa esta firma.
 
 ```text
 retrieve(query, query_representation, *, top_k) -> Ranking[Chunk]
 ```
 
-Un retriever con `input` es restringido:
+Un retriever restringido declara `inputs: upstream` para un ranking o
+`inputs: [hybrid, fuzzy, dense]` para varios. El binding recibe un mapping de solo lectura
+`nombre -> Ranking[Chunk]` en el orden declarado, con el orden y los scores
+propios de cada ranking.
 
 ```text
-retrieve_candidates(query, query_representation, candidates, *, top_k)
+retrieve_candidates(query, query_representation, rankings, *, top_k)
     -> Ranking[Chunk]
 ```
 
-El segundo solo puede devolver IDs presentes en `candidates`. El pipeline
-reemplaza cualquier copia del chunk por el objeto canónico de entrada y aplica
-`top_k`.
+El binding puede filtrar o reordenar candidatos. El pipeline valida todos los IDs devueltos
+contra la unión de las entradas antes de aplicar `top_k`. Para cada ID usa el
+chunk canónico del primer ranking declarado que lo contiene.
 
 Vector stores, búsquedas vectoriales locales e índices BM25 son roles habituales
 de un retriever fuente. Rerankers y selectores LLM son roles habituales de un
-retriever restringido: implementan `retrieve_candidates`, pueden filtrar o
-reordenar candidatos, pero no introducir chunks nuevos. No son tipos especiales
-de configuración; la diferencia la determinan `input` y el contrato del binding.
+retriever restringido.
 
 Una fusion consume al menos dos rankings nombrados y usa `weighted_rrf`,
 `weighted_sum` o `comb_mnz`. “Hybrid” no es un tipo especial. “Cascade” es un
-retriever cuyo `input` referencia otro ranking.
+retriever cuyo `inputs` referencia rankings de etapas previas.
+
+Un router obtiene su binding de `ComponentBindings.routers` y llama a
+`route(query, rankings, parameters=...)`. Recibe el `Query` original, los
+rankings de `inputs` y los `parameters` del YAML, mediante mappings de solo
+lectura. Cada invocación recibe una copia de los valores anidados de `parameters`.
+El binding devuelve un nombre de `targets`. El router publica el
+ranking de ese nodo. Cualquier retriever, fusión o router puede ser una entrada,
+un destino permitido o el terminal de un output.
 
 ### Build y retrieve
 
 `build()` valida nombres, preprocessors usados, bindings, métodos requeridos,
 referencias, outputs, nodos muertos y ciclos. No consulta stores ni ejecuta
-retrievers.
+retrievers. Comprueba la alcanzabilidad y los ciclos teniendo en cuenta tanto
+las dependencias de `inputs` como todos los `targets` posibles.
 
 En `retrieve()` los nodos se ejecutan concurrentemente según sus dependencias.
 Cada preprocessor se memoiza mediante una tarea por nombre y se ejecuta como
 máximo una vez por query, aunque lo compartan varios retrievers. Un retriever
-restringido espera su ranking de entrada y su preprocessor; una fusión espera
-todos sus rankings. Los rankings intermedios viven solo en esa llamada.
+espera su propio preprocessor y todos los rankings de entrada que declare. Sin
+routers, se lanzan todos los preprocessors antes de lanzar los retrievers. Con
+routers, se lanzan los preprocessors de los retrievers requeridos. Una fusión espera
+sus rankings y un router espera sus `inputs` antes de decidir. Los nodos y sus
+rankings se comparten durante la llamada, incluidos los destinos también
+solicitados como outputs.
 
 Cada output publica `terminal_node`, `ranking` y un status derivado
-`completed|empty`. `retrieve(query, outputs=...)` selecciona qué outputs
-devuelve, aunque el DAG configurado se ejecuta completo.
+`completed|empty`. Sin routers, el DAG completo se ejecuta para cualquier
+selección de `outputs`. Con routers, la ejecución parte de los outputs
+solicitados y recorre sus dependencias y los destinos elegidos. Las ramas
+compartidas se ejecutan una vez por llamada. Al omitir `outputs` se solicitan
+todos los outputs públicos.
 
-Cualquier error aborta la llamada completa y cancela las tareas pendientes.
+Cualquier error aborta la llamada completa y cancela las tareas pendientes. Si
+falla una entrada del router, el error se propaga antes de invocar el binding.
 
 ## Fronteras externas
 

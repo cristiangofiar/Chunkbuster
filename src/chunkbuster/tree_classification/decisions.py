@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from types import MappingProxyType
 
+from ..core.contracts import invoke_router
 from ..core.models import Query
 from ..core.ranking import Ranking
 from ..errors import InvalidModelOutputError
@@ -56,9 +56,7 @@ async def route_decision(
     query: Query,
     rankings: Mapping[str, Ranking[TaxonomyPath]],
 ) -> str:
-    parameters = MappingProxyType(dict(spec.parameters))
-    candidates = MappingProxyType(dict(rankings))
-    raw = await component.route(query, candidates, parameters=parameters)
+    raw = await invoke_router(component, query, rankings, parameters=spec.parameters)
     if isinstance(raw, DecisionRoute):
         decider_name = raw.decider
     elif isinstance(raw, str) and raw:

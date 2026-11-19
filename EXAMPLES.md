@@ -4,10 +4,10 @@ Esta guía continúa los pipelines mínimos del [README](README.md). Cada nivel 
 una configuración completa: conserva lo aprendido y agrega una decisión
 arquitectónica nueva.
 
-| Producto | Nivel 1 | Nivel 2 | Nivel 3 |
-|---|---|---|---|
-| Retrieval | Vector store + reranker | Dos búsquedas + fusión + LLM | Retrieval híbrido completo |
-| Tree Classification | Dos estrategias de path | Dense + BM25 + fusiones | Decisión y routing completos |
+| Producto | Nivel 1 | Nivel 2 | Nivel 3 | Nivel 4 |
+|---|---|---|---|---|
+| Retrieval | Vector store + reranker | Dos búsquedas + fusión + LLM | Retrieval híbrido completo | [Router y DM](#nivel-4-elegir-una-rama-con-un-router-de-retrieval) |
+| Tree Classification | Dos estrategias de path | Dense + BM25 + fusiones | Decisión y routing completos | |
 
 En todos los diagramas:
 
@@ -22,9 +22,9 @@ Las vistas principales son SVG con distribución fija para conservar la
 legibilidad en GitHub y en el IDE. Debajo de cada una puedes desplegar el grafo
 Mermaid completo. El YAML y los bindings Python describen el mismo pipeline.
 
-Los nombres de bindings terminan en `_adapter`. Un reranker y un selector LLM
-de Retrieval son **retrievers restringidos**: declaran `input`, reciben un
-ranking existente y solo pueden filtrar o reordenar esos chunks.
+Los nombres de bindings terminan en `_adapter`. Un reranker o selector LLM
+de Retrieval declara `inputs` con un nombre o una lista de nombres. Puede filtrar
+o reordenar los chunks de sus entradas.
 
 # RetrievalPipeline
 
@@ -104,7 +104,7 @@ retrievers:
   - name: cross_encoder_reranker
     binding: cross_encoder_reranker_adapter
     preprocessor: reranker_query_tokenizer
-    input: catalog_vector_store
+    inputs: catalog_vector_store
     top_k: 10
 
 outputs:
@@ -129,7 +129,8 @@ class CrossEncoderRerankerAdapter:
     def __init__(self, model):
         self.model = model
 
-    async def retrieve_candidates(self, query, query_tokens, candidates, *, top_k):
+    async def retrieve_candidates(self, query, query_tokens, rankings, *, top_k):
+        (candidates,) = rankings.values()
         scores = await self.model.score(
             query_tokens,
             [item.item.text for item in candidates],
@@ -251,12 +252,12 @@ retrievers:
   - name: cross_encoder_reranker
     binding: cross_encoder_reranker_adapter
     preprocessor: refinement_query_tokenizer
-    input: vector_rank_fusion
+    inputs: vector_rank_fusion
     top_k: 20
   - name: llm_chunk_selector
     binding: llm_chunk_selector_adapter
     preprocessor: refinement_query_tokenizer
-    input: cross_encoder_reranker
+    inputs: cross_encoder_reranker
     top_k: 1
 
 fusions:
@@ -291,7 +292,8 @@ class LLMChunkSelectorAdapter:
     def __init__(self, llm):
         self.llm = llm
 
-    async def retrieve_candidates(self, query, query_tokens, candidates, *, top_k):
+    async def retrieve_candidates(self, query, query_tokens, rankings, *, top_k):
+        (candidates,) = rankings.values()
         chosen_ids = await self.llm.choose_chunks(
             query_tokens=query_tokens,
             candidates=[item.item for item in candidates],
@@ -437,12 +439,12 @@ retrievers:
   - name: cross_encoder_reranker
     binding: cross_encoder_reranker_adapter
     preprocessor: sparse_query_tokenizer
-    input: hybrid_rank_fusion
+    inputs: hybrid_rank_fusion
     top_k: 30
   - name: llm_chunk_selector
     binding: llm_chunk_selector_adapter
     preprocessor: sparse_query_tokenizer
-    input: consensus_fusion
+    inputs: consensus_fusion
     top_k: 1
 
 fusions:
@@ -507,6 +509,179 @@ bindings = ComponentBindings(
 
 `BM25SearchAdapter` es un retriever fuente: implementa
 `retrieve(query, tokens, *, top_k)`. Las fusiones son internas y no necesitan binding.
+
+## Nivel 4: elegir una rama con un router de retrieval
+
+`dense` y `fuzzy` se ejecutan en paralelo. `hybrid` combina sus scores en la
+misma escala con una suma ponderada. El router inspecciona los tres rankings
+y elige por este orden.
+
+1. Un único exacto en `fuzzy` → `fuzzy_exact` devuelve ese candidato.
+2. Cero exactos y un top 1 híbrido con score ≥ 0,80 → `hybrid_top_one` lo devuelve.
+3. Cualquier otro caso, incluidos varios exactos → `dm` puede elegir un candidato
+   de los tres rankings o devolver un ranking vacío.
+
+`retrieval-routed.yaml`:
+
+```yaml
+version: 1
+name: collectives
+kind: retrieve
+
+preprocessors:
+  - name: search_text
+    binding: search_text_adapter
+
+retrievers:
+  - name: dense
+    binding: dense_adapter
+    preprocessor: search_text
+  - name: fuzzy
+    binding: fuzzy_adapter
+    preprocessor: search_text
+  - name: fuzzy_exact
+    binding: exact_adapter
+    preprocessor: search_text
+    inputs: fuzzy
+    top_k: 1
+  - name: hybrid_top_one
+    binding: top_one_adapter
+    preprocessor: search_text
+    inputs: hybrid
+    top_k: 1
+  - name: dm
+    binding: dm_adapter
+    preprocessor: search_text
+    inputs: [hybrid, fuzzy, dense]
+    top_k: 1
+
+fusions:
+  - name: hybrid
+    type: weighted_sum
+    inputs: [dense, fuzzy]
+    weights: [0.5, 0.5]
+
+routers:
+  - name: collective_router
+    binding: collective_router_adapter
+    inputs: [hybrid, fuzzy, dense]
+    targets: [fuzzy_exact, hybrid_top_one, dm]
+    parameters:
+      min_hybrid_score: 0.80
+
+outputs:
+  primary: collective_router
+  evidence: hybrid
+```
+
+Los bindings siguientes usan rankings fijos y un DM simulado. Guarda el YAML
+junto al script y ejecútalo desde ese directorio.
+
+```python
+import asyncio
+
+from chunkbuster import Chunk, ComponentBindings, RankedItem, Ranking, RetrievalPipeline
+
+
+def exact_matches(text, ranking):
+    return tuple(hit for hit in ranking if hit.item.text.casefold() == text)
+
+
+class SearchText:
+    async def prepare_query(self, query):
+        return query.text.casefold()
+
+
+class FixedRetriever:
+    def __init__(self, *hits):
+        self.ranking = Ranking(
+            tuple(RankedItem(chunk.id, chunk, score) for chunk, score in hits)
+        )
+
+    async def retrieve(self, query, text, *, top_k):
+        return self.ranking.top(top_k)
+
+
+class ExactRetriever:
+    async def retrieve_candidates(self, query, text, rankings, *, top_k):
+        return Ranking(exact_matches(text, rankings["fuzzy"]))
+
+
+class TopOneRetriever:
+    async def retrieve_candidates(self, query, text, rankings, *, top_k):
+        return rankings["hybrid"].top(1)
+
+
+class SimulatedDM:
+    def __init__(self):
+        self.calls = []
+
+    async def retrieve_candidates(self, query, text, rankings, *, top_k):
+        self.calls.append(query.text)
+        corroborated = set(rankings["hybrid"].ids) & set(rankings["dense"].ids)
+        matches = tuple(
+            hit
+            for hit in exact_matches(text, rankings["fuzzy"])
+            if hit.id in corroborated
+        )
+        return Ranking(matches if len(matches) == 1 else ())
+
+
+class CollectiveRouter:
+    async def route(self, query, rankings, *, parameters):
+        exacts = exact_matches(query.text.casefold(), rankings["fuzzy"])
+        if len(exacts) == 1:
+            return "fuzzy_exact"
+        hybrid = rankings["hybrid"]
+        if not exacts and hybrid and hybrid[0].score >= parameters["min_hybrid_score"]:
+            return "hybrid_top_one"
+        return "dm"
+
+
+async def main():
+    music = Chunk("music", "Música")
+    sports_a = Chunk("sports-a", "Deporte")
+    sports_b = Chunk("sports-b", "Deporte")
+    dm = SimulatedDM()
+    pipeline = await RetrievalPipeline.build(
+        config="retrieval-routed.yaml",
+        bindings=ComponentBindings(
+            preprocessors={"search_text_adapter": SearchText()},
+            retrievers={
+                "dense_adapter": FixedRetriever((sports_a, 0.94), (music, 0.90)),
+                "fuzzy_adapter": FixedRetriever(
+                    (sports_a, 0.90), (music, 0.86), (sports_b, 0.55)
+                ),
+                "exact_adapter": ExactRetriever(),
+                "top_one_adapter": TopOneRetriever(),
+                "dm_adapter": dm,
+            },
+            routers={"collective_router_adapter": CollectiveRouter()},
+        ),
+    )
+    for query, expected in [
+        ("música", ("music",)),
+        ("actividad", ("sports-a",)),
+        ("deporte", ("sports-a",)),
+    ]:
+        result = await pipeline.retrieve(query, outputs=["primary"])
+        assert result.outputs["primary"].ranking.ids == expected
+    assert dm.calls == ["deporte"]
+
+    evidence = await pipeline.retrieve("deporte", outputs=["evidence"])
+    assert evidence.outputs["evidence"].ranking[0].score >= 0.80
+    assert dm.calls == ["deporte"]
+
+
+asyncio.run(main())
+```
+
+`inputs` entrega un mapping de solo lectura con los rankings y sus scores en
+el orden declarado. `targets` enumera las ramas que el router puede elegir.
+Con `outputs=["primary"]` se ejecutan los tres rankings de decisión y la rama
+elegida. Con `outputs=["evidence"]` basta el grafo de la fusión. Si se piden
+ambos outputs, comparten `hybrid`. El ranking que publica el router también
+puede alimentar un retriever, una fusión u otro router.
 
 # TreeClassificationPipeline
 
@@ -1044,6 +1219,7 @@ routers:
       - llm_path_decider
     binding: decision_router_adapter
     parameters:
+      min_confidence_score: 0.65  # Mismo valor que min_score en confidence_decider
       ambiguity_margin: 0.08
 
 outputs:
@@ -1055,7 +1231,12 @@ outputs:
 Bindings:
 
 ```python
-from chunkbuster import ComponentBindings, DecisionRoute, DecisionSelection, TextTokenizer
+from chunkbuster import (
+    ComponentBindings,
+    DecisionRoute,
+    DecisionSelection,
+    TextTokenizer,
+)
 
 
 class BusinessPathScorerAdapter:
@@ -1080,7 +1261,7 @@ class LLMPathDeciderAdapter:
 class AdaptiveDecisionRouterAdapter:
     async def route(self, query, candidates, *, parameters):
         confidence = candidates["confidence_decider"]
-        if confidence:
+        if any(hit.score >= parameters["min_confidence_score"] for hit in confidence):
             return DecisionRoute("confidence_decider")
         fast = candidates["fast_top_one_decider"]
         margin = parameters["ambiguity_margin"]
@@ -1111,6 +1292,8 @@ bindings = ComponentBindings(
 ```
 
 El router recibe un mapping de solo lectura
-`decider_name -> Ranking[TaxonomyPath]`. Elige un decider permitido; no ejecuta
-ni modifica rankings. Cada rama declarada termina en un output, router o
-fusión, por lo que el build no acepta ramas colgadas.
+`decider_name -> Ranking[TaxonomyPath]` y elige un decider permitido. El ranking
+que recibe para `confidence_decider` contiene candidatos previos al filtro.
+La ruta de confianza comprueba el mismo `min_score` que el decider, porque
+todos los candidatos de un ranking no vacío pueden quedar por debajo del umbral.
+Cada rama declarada termina en un output, router o fusión.

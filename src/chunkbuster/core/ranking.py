@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from math import isfinite
 from types import MappingProxyType
@@ -92,19 +92,24 @@ def require_ranking(value: Any, *, component: str) -> Ranking[Any]:
 
 def require_subset[Item](
     output: Ranking[Item],
-    candidates: Ranking[Any],
+    candidates: Iterable[Ranking[Item]],
     *,
     component: str,
 ) -> Ranking[Item]:
-    """Ensure a unary/candidate stage cannot invent identities."""
-    unknown = set(output.ids) - set(candidates.ids)
+    """Canonicalize candidates against input rankings in declaration order."""
+    canonical: dict[str, Item] = {}
+    origins: set[str] = set()
+    for ranking in candidates:
+        origins.update(ranking.origins)
+        for item in ranking:
+            canonical.setdefault(item.id, item.item)
+    unknown = set(output.ids) - canonical.keys()
     if unknown:
         raise InvalidModelOutputError(
             f"{component!r} returned identities outside its input: {sorted(unknown)!r}"
         )
-    canonical = {item.id: item.item for item in candidates}
     items = tuple(replace(item, item=canonical[item.id]) for item in output)
-    return Ranking(items, output.score_semantics, candidates.origins)
+    return Ranking(items, output.score_semantics, frozenset(origins))
 
 
 def reciprocal_rank_fusion[Item](

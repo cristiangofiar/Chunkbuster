@@ -11,7 +11,7 @@ combínalos y publica varios resultados sin acoplarte a un proveedor.
 
 | Producto | Para qué sirve | Qué combina |
 |---|---|---|
-| `RetrievalPipeline` | Recuperar, refinar y ordenar chunks | Vector stores, búsqueda local, rerankers, selectores LLM y fusiones |
+| `RetrievalPipeline` | Recuperar, refinar y ordenar chunks | Vector stores, búsqueda local, rerankers, selectores LLM, fusiones y routers |
 | `TreeClassificationPipeline` | Elegir paths de una taxonomía | Dense/BM25, scoring de paths, fusiones, reglas y LLMs |
 
 ## Por qué Chunkbuster
@@ -198,9 +198,10 @@ result = await pipeline.retrieve("Auriculares inalámbricos")
 print(result.outputs["primary"].ranking.ids)
 ```
 
-Un reranker o un selector LLM se incorpora como otro retriever con `input`.
-Recibe candidatos existentes y puede filtrarlos o reordenarlos, pero no
-inventar chunks. La guía avanzada muestra ambos casos.
+Un reranker o un selector LLM declara `inputs` con un nombre o una lista de
+nombres. El binding recibe los rankings por nombre. Un router inspecciona rankings y
+publica el ranking de la rama que elige. La guía avanzada incluye un
+[ejemplo con un router de retrieval](EXAMPLES.md#nivel-4-elegir-una-rama-con-un-router-de-retrieval).
 
 ## Clasificación semántica mínima
 
@@ -409,13 +410,17 @@ custom respecto a 0.4.2; sus adapters deben actualizarse a las firmas siguientes
 | Preprocessor `tokenizer` de Tree | `prepare_query(query)` | Secuencia de tokens no vacíos |
 | Document preprocessor de Tree | `prepare_documents(texts)` | Una representación válida por texto cuando deba generarse |
 | Retriever fuente | `retrieve(query, representation, *, top_k)` | `Ranking[Chunk]` |
-| Retriever restringido | `retrieve_candidates(query, representation, candidates, *, top_k)` | `Ranking[Chunk]` con IDs contenidos en `candidates` |
+| Retriever con `inputs` | `retrieve_candidates(query, representation, rankings, *, top_k)` | `Ranking[Chunk]` con IDs de la unión de las entradas |
+| Router de Retrieval | `route(query, rankings, *, parameters)` | Nombre de un nodo de ranking incluido en `targets` |
 | Path scorer `custom` | `score_path(query, path, node_scores)` | Número finito |
 | Decider `llm` | `decide(query, candidates, *, count)` | `DecisionSelection` con IDs del ranking recibido |
-| Router | `route(query, candidates, *, parameters)` | Nombre permitido de decider o `DecisionRoute` |
+| Router de Tree | `route(query, candidates, *, parameters)` | Nombre permitido de decider o `DecisionRoute` |
 
-Un reranker y un selector LLM de Retrieval usan el contrato de retriever
-restringido. En Tree, el decider `llm` recibe el ranking completo de paths; un
+Para migrar un retriever restringido de 0.4.3, cambia `input: upstream` a
+`inputs: upstream`. El tercer argumento de `retrieve_candidates` pasa a ser un
+mapa de rankings. Accede al ranking individual con `rankings["upstream"]`.
+
+En Tree, el decider `llm` recibe el ranking completo de paths; un
 router recibe un mapping de solo lectura
 `decider_name -> Ranking[TaxonomyPath]`.
 

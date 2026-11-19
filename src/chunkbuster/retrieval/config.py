@@ -4,13 +4,14 @@ from __future__ import annotations
 
 from typing import Annotated, Literal
 
-from pydantic import Field, model_validator
+from pydantic import Field, JsonValue, field_validator, model_validator
 
 from ..core.config import StrictConfig
 from ..core.normalization import Normalization
 
 Name = Annotated[str, Field(min_length=1)]
 PositiveInt = Annotated[int, Field(gt=0)]
+Names = Annotated[tuple[Name, ...], Field(min_length=1)]
 
 
 class PreprocessorConfig(StrictConfig):
@@ -22,8 +23,15 @@ class RetrieverConfig(StrictConfig):
     name: Name
     binding: Name
     preprocessor: Name
-    input: Name | None = None
+    inputs: Names | None = None
     top_k: PositiveInt = 20
+
+    @field_validator(
+        "inputs", mode="before", json_schema_input_type=Name | Names | None
+    )
+    @classmethod
+    def normalize_inputs(cls, inputs: object) -> object:
+        return (inputs,) if isinstance(inputs, str) else inputs
 
 
 class FusionConfig(StrictConfig):
@@ -48,6 +56,23 @@ class FusionConfig(StrictConfig):
         return self
 
 
+class RouterConfig(StrictConfig):
+    name: Name
+    binding: Name
+    inputs: Names
+    targets: Names
+    parameters: dict[str, JsonValue] = Field(default_factory=dict)
+
+    @field_validator("inputs", "targets")
+    @classmethod
+    def validate_names(cls, names: tuple[str, ...]) -> tuple[str, ...]:
+        if len(names) != len(set(names)):
+            raise ValueError(
+                "router names within each input or target list must be unique"
+            )
+        return names
+
+
 class RetrievalConfig(StrictConfig):
     version: Literal[1] = 1
     name: Name
@@ -55,4 +80,5 @@ class RetrievalConfig(StrictConfig):
     preprocessors: tuple[PreprocessorConfig, ...]
     retrievers: tuple[RetrieverConfig, ...]
     fusions: tuple[FusionConfig, ...] = ()
+    routers: tuple[RouterConfig, ...] = ()
     outputs: dict[Name, Name]

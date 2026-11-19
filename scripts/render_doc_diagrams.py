@@ -248,7 +248,7 @@ def dependencies(config):
         for spec in config.get(group, []):
             nodes[spec["name"]] = dict(spec, group=group)
             sources = spec.get("inputs", []) or spec.get("deciders", [])
-            sources = list(sources)
+            sources = [sources] if isinstance(sources, str) else list(sources)
             for key in ("input", "preprocessor"):
                 if key in spec:
                     sources.append(spec[key])
@@ -575,11 +575,14 @@ markerHeight="7" orient="auto-start-reverse">
 def main():
     DEST.mkdir(parents=True, exist_ok=True)
     for doc in ("README.md", "EXAMPLES.md"):
-        for raw in re.findall(r"```yaml\n(.*?)```", (ROOT / doc).read_text(), re.S):
+        document = (ROOT / doc).read_text(encoding="utf-8")
+        for raw in re.findall(r"```yaml\n(.*?)```", document, re.S):
             config = yaml.safe_load(raw)
+            if config["name"] not in LAYOUTS:
+                continue
             svg = render(config)
             path = DEST / f"{config['name']}.svg"
-            path.write_text(svg + "\n")
+            path.write_text(svg + "\n", encoding="utf-8")
             print(path.relative_to(ROOT))
 
 
